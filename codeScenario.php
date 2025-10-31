@@ -3,6 +3,9 @@
  * Scénario d'interrogation d'une IA (OpenAI Assistant)
  * Version simplifiée utilisant la classe JeedomAssistant
  * 
+ * @author Franck WEHRLE
+ * @version 2.0
+ * 
  * Tags nécessaires:
  * - #profile# : Nom de l'utilisateur (obligatoire)
  * - #msg# : Question/commande (obligatoire)
@@ -29,7 +32,7 @@ $config = [
     // Pièces à inclure
     'pieces_inclus' => [
         "Maison", "Jardin", "Piscine", "Consos", "Entrée", "Salon", "Salle à manger", "Cuisine", "Garage", 
-        "12 niveau", "Bibliothèque", "Salle de bain", "Chambre Parents", "Bureau", "Etage", "Chambre Evan", "Chambre Eliott"
+        "Demi Niveau", "Bibliothèque", "Salle de bain", "Chambre Parents", "Bureau", "Etage", "Chambre Evan", "Chambre Eliott"
     ],
   
     // Équipements à exclure
@@ -173,5 +176,6 @@ $assistant->reset();
 $jeedomJson = $assistant->collectJeedomData(['Salon', 'Cuisine'], 'info');
 echo $jeedomJson;
 */
+
 
 ?>

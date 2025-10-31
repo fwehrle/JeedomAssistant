@@ -6,7 +6,7 @@
  * et d'exécuter les actions recommandées
  * 
  * @author Franck WEHRLE
- * @version 1.1
+ * @version 2.0
  */
 /**
  * ┌─────────────────┬───────┬──────────────┬──────────────┬─────────────────────────┐

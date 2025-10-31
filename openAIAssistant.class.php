@@ -2,7 +2,7 @@
 
 /* Classe d'utilisation de l'API assistant d'OpenAI
 * @author Franck WEHRLE avec l'aide de Claude.ai qui m'a conseillé chatGPT parce qu'elle n'avait pas de gestion de thread ;)
-* @version 1.1
+* @version 2.0
 */
 
 // ============================================
