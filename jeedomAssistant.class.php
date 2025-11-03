@@ -6,7 +6,7 @@
  * et d'exécuter les actions recommandées
  * 
  * @author Franck WEHRLE
- * @version 2.01
+ * @version 2.02
  */
 /**
  * ┌─────────────────┬───────┬──────────────┬──────────────┬─────────────────────────┐
@@ -149,7 +149,6 @@ class JeedomAssistant {
      * @return string JSON des commandes
      */
     public function collectJeedomData($pieces = null, $mode = 'action') {
-        if ($this->debug) echo "Collecte des données Jeedom (mode: $mode)\n";
         
         // Utiliser toutes les pièces si non spécifié
         if ($pieces === null) {
@@ -160,7 +159,7 @@ class JeedomAssistant {
                 return in_array($piece, $this->piecesInclus);
             });
         }
-        
+        if ($this->debug) echo "Collecte des données Jeedom (mode: $mode) pour les pieces : " . implode(", ", $pieces) . "\n";
         $this->jeedomCommands = [];
         $eqLogics = [];
         
@@ -457,7 +456,7 @@ class JeedomAssistant {
                 "  \"id\": \"ID de la ou les commande(s) ou équipement(s) Jeedom si trouvée(s), séparées par virgules, ou vide\",\n" .
                 "  \"mode\": \"action\" ou \"info\",\n" .
                 "  \"confidence\": \"high\" ou \"medium\" ou \"low\",\n" .
-          		"  \"type action\": \"code du type de l'action que tu souhaite executer\"\n" .
+          		"  \"type action\": \"code du type de l'action que tu souhaite executer. OBLIGATOIRE si un id est précisé.\"\n" .
                 "}\n\n" .
                 
                 "# RÈGLES DE DÉTECTION DU MODE\n" .
@@ -527,14 +526,16 @@ class JeedomAssistant {
     
     /**
      * Poser une question à l'assistant
-     * 
+     *
      * @param string $profile Nom du profil utilisateur
      * @param string $question Question à poser
      * @param array $pieces Pièces concernées (null = toutes)
      * @param string $mode Mode 'action' ou 'info'
+     * @param bool $sendJeedomData Envoyer les données Jeedom
+     * @param array|null $images Tableau d'images: [['data' => $imageData, 'filename' => 'image.jpg'], ...]
      * @return array Réponse parsée
      */
-    public function ask($profile, $question, $pieces = null, $mode = 'action',$sendJeedomData = true, $imageData = null, $filename = 'image.jpg') {
+    public function askAssistant($profile, $question, $pieces = null, $mode = 'action', $sendJeedomData = true, $images = null) {
         if ($this->debug) echo "jeedomAssistant ask : ".$question."\n";
         $startTime = microtime(true);
 
@@ -588,13 +589,13 @@ class JeedomAssistant {
         
         // Interroger l'assistant
         if ($this->debug) echo "Interrogation de l'assistant IA\n";
-        
-        if (!empty($imageData) && $imageData !== false) {
-            if ($this->debug) echo "Analyse d'image : askWithImage\n";
-			$response = $this->ai->askWithImage($profile, $message, $assistantConfig, $imageData, $filename, $this->openaiVisionModel);
-    	}else{
-             if ($this->debug) echo "Analyse de texte : ask\n";
-             $response = $this->ai->ask($profile, $message, $assistantConfig, $this->openaiModel);
+
+        if (!empty($images) && is_array($images)) {
+            if ($this->debug) echo "Analyse d'image(s) : askWithImage\n";
+			$response = $this->ai->askWithImage($profile, $message, $assistantConfig, $images, $this->openaiVisionModel);
+    	} else {
+            if ($this->debug) echo "Analyse de texte : ask\n";
+            $response = $this->ai->ask($profile, $message, $assistantConfig, $this->openaiModel);
         }
         
         if ($this->debug) echo "Réponse BRUTE : $response\n";
@@ -609,10 +610,71 @@ class JeedomAssistant {
     }
     
     /**
+     * Poser une question à l'IA sans passer par l'assistant existant
+     *
+     * @param string $profile Nom du profil utilisateur
+     * @param string $question Question à poser
+     * @param array $pieces Pièces concernées (null = toutes)
+     * @return array Réponse parsée
+     */
+    /**
+     * Appel rapide à l'IA via Chat Completion (sans historique/thread)
+     * Utilisé pour des requêtes simples comme l'extraction de pièces
+     *
+     * @param string $profile Profil utilisateur
+     * @param string $question Question à poser
+     * @param array|null $pieces Pièces (non utilisé pour l'instant)
+     * @return string Réponse JSON brute de l'IA
+     */
+    public function askIA($profile, $question, $pieces = null) {
+        if ($this->debug) echo "jeedomAssistant askIA (Chat Completion direct) : " . substr($question, 0, 80) . "...\n";
+        $startTime = microtime(true);
+
+        if ($this->debug) {
+            echo "📝 Taille de la question: " . strlen($question) . " octets\n";
+            echo "🔤 Estimation tokens (~4 chars/token): " . round(strlen($question) / 4) . " tokens\n";
+        }
+
+        // ✅ Appel DIRECT à l'API Chat Completion (pas de thread/assistant)
+        $systemPrompt = "Tu es un assistant intelligent qui répond uniquement en JSON valide. " .
+                        "Suis exactement le format demandé sans ajouter de texte explicatif.";
+
+        $response = $this->ai->chatCompletion($systemPrompt, $question, $this->openaiModel);
+
+        if ($this->debug) echo "Réponse BRUTE chatCompletion : $response\n";
+
+        $endTime = microtime(true);
+        $duration = round($endTime - $startTime, 3);
+        if ($this->debug) echo "⏱️ Temps d'exécution jeedomAssistant askIA: {$duration}s\n";
+
+        return $response;
+    }
+
+    /**
      * Parser et traiter la réponse de l'IA
      */
     private function parseResponse($response, $profile) {
         try {
+            // Assurer que tous les champs existent
+            $defaults = [
+                'question' => '',
+                'response' => '',
+                'piece' => '',
+                'id' => '',
+                'mode' => 'info',
+                'confidence' => 'medium',
+                'type action' => ''
+            ];
+
+            if (empty($response)) {
+                throw new Exception("Réponse vide");
+            }
+
+            // ✅ Si déjà un array, le retourner directement
+            if (is_array($response)) {
+                return array_merge($defaults, $response);
+            }
+
             // Nettoyer la réponse (retirer les backticks markdown si présents)
             $response = preg_replace('/^```json\s*|\s*```$/m', '', $response);
             
@@ -630,18 +692,7 @@ class JeedomAssistant {
             if ($responseData === null) {
                 throw new Exception("Réponse JSON vide");
             }
-            
-            // Assurer que tous les champs existent
-            $defaults = [
-                'question' => '',
-                'response' => '',
-                'piece' => '',
-                'id' => '',
-                'mode' => 'info',
-                'confidence' => 'medium',
-                'type action' => ''
-            ];
-            
+
             return array_merge($defaults, $responseData);
             
         } catch (Exception $e) {
@@ -767,58 +818,102 @@ class JeedomAssistant {
     }
        
     /**
-     * Exécuter une commande camera jeedom
-     * 
+     * Exécuter une analyse de caméra(s) Jeedom avec l'IA
+     *
      * @param array $response Réponse parsée
      * @param string $profile Profil utilisateur
-     * @return bool Action exécutée ou non
+     * @param string|array $eqLogicIds ID(s) de caméra(s) (string unique ou array)
+     * @return array|bool Réponse de l'assistant ou false en cas d'erreur
      */
-    public function executeCamera($response = null, $profile = null, $eqLogicId) {
-		echo "executeCamera\n";
-        $startTime = microtime(true); // 🕒 Démarre le chronomètre
+    public function executeCamera($response = null, $profile = null, $eqLogicIds) {
+        echo "executeCamera\n";
+        $startTime = microtime(true);
 
-        //TODO : recuperation et renvoi de l'image a l'assistant + dans une notif?
-      
-        if (empty($eqLogicId)) {
+        if (empty($eqLogicIds)) {
             return false;
-        }
- 
-        $eqLogic = eqLogic::byId($eqLogicId);
-        
-        if (!is_object($eqLogic)) {
-            if ($this->debug) echo "Equipement ID $eqLogicId non trouvée\n";
-            return false;
-        }
-        
-        if ($eqLogic->getEqType_name() !== 'camera') {
-            if ($this->debug) echo "L'equipement $eqLogicId n'est pas une camera\n";
-            return false;
-        }
-        
-        $eqLogicName = $eqLogic->getHumanName();
-        if ($this->debug) echo "Analyse CAMERA ==> $eqLogicName\n";
-        
-        // Récupération du flux d'une camera
-        $imageData = $this->getCameraImage($eqLogicId);
-        //$imageData2='';
-        if ($imageData !== false) {
-            echo "Image recupérée (".strlen($imageData)." octets)\n";;
         }
 
-        //process($profile, $question, $pieces = null, $mode = 'action', $notificationCommand = '', $imageData = null, $filename = null) {
-        //$result = $this->process($profile, $question, $pieces, $mode, $notificationCommand, $imageData2, 'cam.jpg');
-        if($response['question'] === null || empty($response['question'])){
-          $question = "Analyse l'image de la caméra de surveillance";
-        }else{
-          $question = "Réponds à la question en analysant l'image de la caméra de surveillance: ".$response['question'];
+        // ✅ Convertir en tableau si c'est un ID unique
+        if (!is_array($eqLogicIds)) {
+            $eqLogicIds = [$eqLogicIds];
         }
-        $response2 = $this->ask($profile, $question, $response['piece'], null, false, $imageData, null); //TODO : préciser un mode? et un nom de fichier?
-        
-        $endTime = microtime(true); // 🕒 Stoppe le chronomètre
-        $duration = round($endTime - $startTime, 3); // Temps en secondes
+
+        $images = [];
+        $cameraNames = [];
+
+        // ✅ Boucle sur tous les IDs de caméras
+        foreach ($eqLogicIds as $eqLogicId) {
+            if (empty($eqLogicId)) {
+                continue;
+            }
+
+            $eqLogic = eqLogic::byId($eqLogicId);
+
+            if (!is_object($eqLogic)) {
+                if ($this->debug) echo "⚠️ Equipement ID $eqLogicId non trouvé\n";
+                continue;
+            }
+
+            if ($eqLogic->getEqType_name() !== 'camera') {
+                if ($this->debug) echo "⚠️ L'équipement $eqLogicId n'est pas une caméra\n";
+                continue;
+            }
+
+            $eqLogicName = $eqLogic->getHumanName();
+            $cameraNames[] = $eqLogicName;
+
+            if ($this->debug) echo "📷 Récupération image de $eqLogicName...\n";
+
+            // Récupération du flux de la caméra
+            $imageData = $this->getCameraImage($eqLogicId);
+
+            if ($imageData !== false) {
+                if ($this->debug) echo "✅ Image récupérée (" . strlen($imageData) . " octets)\n";
+
+                // Ajouter l'image au tableau
+                $images[] = [
+                    'data' => $imageData,
+                    'filename' => "camera_" . $eqLogicId . ".jpg"
+                ];
+            } else {
+                if ($this->debug) echo "❌ Impossible de récupérer l'image de $eqLogicName\n";
+            }
+        }
+
+        // Vérifier qu'on a au moins une image
+        if (empty($images)) {
+            if ($this->debug) echo "❌ Aucune image de caméra récupérée\n";
+            return false;
+        }
+
+        // Construire la question pour l'IA
+        $cameraCount = count($images);
+        $cameraList = implode(', ', $cameraNames);
+
+        if ($response['question'] === null || empty($response['question'])) {
+            if ($cameraCount === 1) {
+                $question = "Analyse l'image de la caméra de surveillance : $cameraList";
+            } else {
+                $question = "Analyse les $cameraCount images des caméras de surveillance : $cameraList";
+            }
+        } else {
+            if ($cameraCount === 1) {
+                $question = "Réponds à la question en analysant l'image de la caméra $cameraList : " . $response['question'];
+            } else {
+                $question = "Réponds à la question en analysant les $cameraCount images des caméras $cameraList : " . $response['question'];
+            }
+        }
+
+        if ($this->debug) echo "🤖 Question IA : $question\n";
+
+        // Appel à l'IA avec toutes les images
+        $response2 = $this->askAssistant($profile, $question, $response['piece'], null, false, $images);
+
+        $endTime = microtime(true);
+        $duration = round($endTime - $startTime, 3);
         echo "⏱️ Temps d'exécution executeCamera : {$duration}s\n";
 
-        return $response2; //TODO : retour mono type? pas object ou bool?
+        return $response2;
     }
   
     /**
@@ -867,6 +962,10 @@ class JeedomAssistant {
      * @param string $command Commande de notification (optionnel)
      */
     public function sendMessageNotification($profile, $message, $command = '') {
+        if(empty($message)){
+            $message = "Désolé, je ne sais pas répondre à cette demande.";
+            if ($this->debug) echo "Message vide, envoi incompréhension\n";
+        }   
         if ($this->debug) echo "Envoi notification à $profile: $message\n";
         
         $scenario = scenario::byId($this->notificationScenarioId);
@@ -966,16 +1065,18 @@ class JeedomAssistant {
                     }
 
                     $messageNotif = (empty($message)?$cameraName:$message);
+                    //TODO : voir pourquoi l'image de la camera est parfois trop ancienne?
                     // Options : nombre de captures, message, désactiver les notifications internes, ne pas envoyer la première capture
                     $options = [
                         'nbSnap' => 1,
                         'message' => $messageNotif,
                         'disable_notify' => 1,
+                        'movie' => 0,
                         'sendFirstSnap' => 0
                     ];
                     
                     // Construire la chaîne d'options
-                    $optionsString = "nbSnap={$options['nbSnap']} message='{$options['message']}' disable_notify={$options['disable_notify']} sendFirstSnap={$options['sendFirstSnap']}";
+                    $optionsString = "nbSnap={$options['nbSnap']} message='{$options['message']}' disable_notify={$options['disable_notify']} sendFirstSnap={$options['sendFirstSnap']} movie={$options['movie']}";
                     
                     // Paramètres de la commande
                     $execParams = [
@@ -1040,27 +1141,95 @@ class JeedomAssistant {
 
     /**
      * Traiter une demande complète (ask + execute + notify)
-     * 
+     *
      * @param string $profile Profil utilisateur
      * @param string $question Question
-     * @param array $pieces Pièces concernées
+     * @param array $pieces Pièces concernées (null = toutes, array = liste spécifique)
      * @param string $mode Mode
      * @param string $notificationCommand Commande de notification
+     * @param array|null $images Tableau d'images: [['data' => $imageData, 'filename' => 'image.jpg'], ...]
+     * @param bool $analysePieces Si true, fait un appel préliminaire pour identifier les pièces concernées
      * @return array Résultat complet
      */
-    public function process($profile, $question, $pieces = null, $mode = 'action', $notificationCommand = '', $imageData = null, $filename = null) {
-        
+    public function process($profile, $question, $pieces = null, $mode = 'action', $notificationCommand = '', $images = null, $analysePieces = false) {
+
         try {
           	$notificationProfile = ($profile !== 'Inconnu' && $profile !== '') ? $profile : 'Franck';
             if ($this->debug) echo "PROCESS question : ".$profile." (".$notificationProfile.")\n";
-			
-            // Poser la question
-           if (!empty($imageData)) {
-            if ($this->debug) echo "PROCESS CAMERA : pieces:$pieces mode:$mode \n";
-			$response = $this->ask($profile, $question, $pieces, $mode, false, $imageData, $filename);
-    	   }else{
-            if ($this->debug) echo "PROCESS MESSAGE : pieces:$pieces mode:$mode \n";
-             $response = $this->ask($profile, $question, $pieces, $mode, true, null, null);
+
+            // ✅ Analyse préliminaire des pièces si demandée
+            if ($analysePieces && empty($images)) { //&& $pieces === null 
+                if ($this->debug) echo "🔍 Analyse préliminaire pour identifier les pièces concernées...\n";
+
+                // Créer un prompt minimaliste pour extraire les pièces
+                $piecesQuestion = "Identifie uniquement la ou les pièces mentionnées dans cette question. " .
+                                 "Réponds UNIQUEMENT avec un JSON au format: {\"pieces\": [\"nom_piece1\", \"nom_piece2\"]} " .
+                                 "ou {\"pieces\": []} si aucune pièce spécifique n'est mentionnée.\n" .
+                                 (!empty($pieces) ? "La liste des pièces authorisée en retour est :" . implode(', ', $pieces) . ".\n\n" : "") .
+                                 "Question: " . $question;
+                //TODO : ajouter la liste des pices disponibles $pieces
+
+                // Appel sans données Jeedom (rapide et économique)
+                // askIA retourne une string JSON brute (ou array en cas d'erreur)
+                $piecesResponseRaw = $this->askIA($profile, $piecesQuestion, null);
+
+                // ✅ Vérifier le type de retour
+                if (is_array($piecesResponseRaw)) {
+                    // Cas d'erreur : askIA a retourné un array d'erreur
+                    if ($this->debug) {
+                        echo "⚠️ Erreur lors de l'appel askIA: " . ($piecesResponseRaw['response'] ?? 'Erreur inconnue') . "\n";
+                        echo "⚠️ Collecte de toutes les pièces par défaut\n";
+                    }
+                } elseif (!empty($piecesResponseRaw) && is_string($piecesResponseRaw)) {
+                    if ($this->debug) echo "Réponse brute askIA: " . $piecesResponseRaw . "\n";
+
+                    // Nettoyer la réponse (retirer les backticks markdown si présents)
+                    $piecesResponseCleaned = preg_replace('/^```json\s*|\s*```$/m', '', trim($piecesResponseRaw));
+
+                    // ✅ Valider que c'est du JSON valide
+                    $piecesData = json_decode($piecesResponseCleaned, true);
+
+                    if ($piecesData === null) {
+                        if ($this->debug) {
+                            echo "⚠️ Erreur JSON: " . json_last_error_msg() . "\n";
+                            echo "⚠️ Contenu reçu: " . substr($piecesResponseCleaned, 0, 200) . "\n";
+                        }
+                    }
+
+                    // ✅ Vérifier le format attendu
+                    if ($piecesData !== null && isset($piecesData['pieces']) && is_array($piecesData['pieces'])) {
+                        if (!empty($piecesData['pieces']) && !in_array('Maison', $piecesData['pieces'])) {
+                            $pieces = $piecesData['pieces'];
+                            if ($this->debug) {
+                                echo "✅ JSON valide - Pièces identifiées: " . implode(', ', $pieces) . "\n";
+                            }
+                        } else {
+                            if ($this->debug) {
+                                if (!empty($piecesData['pieces']) && in_array('Maison', $piecesData['pieces'])) {
+                                    echo "ℹ️ JSON valide - Pièce 'Maison' détectée (trop générique), collecte de toutes les pièces\n";
+                                } else {
+                                    echo "ℹ️ JSON valide - Aucune pièce spécifique (tableau vide), collecte de toutes les pièces\n";
+                                }
+                            }
+                        }
+                    } else {
+                        if ($this->debug) {
+                            echo "⚠️ Format JSON invalide - Structure attendue: {\"pieces\": [...]}\n";
+                            echo "⚠️ Collecte de toutes les pièces par défaut\n";
+                        }
+                    }
+                } else {
+                    if ($this->debug) echo "⚠️ Réponse vide ou invalide de askIA, collecte de toutes les pièces\n";
+                }
+            }
+
+            // Poser la question principale
+           if (!empty($images) && is_array($images)) {
+            if ($this->debug) echo "PROCESS CAMERA : pieces:" . (is_array($pieces) ? implode(',', $pieces) : $pieces) . " mode:$mode \n";
+			$response = $this->askAssistant($profile, $question, $pieces, $mode, false, $images);
+    	   } else {
+            if ($this->debug) echo "PROCESS MESSAGE : pieces:" . (is_array($pieces) ? implode(',', $pieces) : $pieces) . " mode:$mode \n";
+             $response = $this->askAssistant($profile, $question, $pieces, $mode, true, null);
            }
          	
             // Exécuter l'action si nécessaire
@@ -1070,9 +1239,13 @@ class JeedomAssistant {
                 $actionResponse = $this->isExecutableAction($response, $profile);
                 switch ($response['type action']) {
                     case 'command': /************** COMMAND ********************************************************************************* */
-                        $actionExecuted = $this->executeActions($response, $profile);
-                        $equipmentNames = $this->getHumanName($response['id'], "cmd");
-                        if ($this->debug) echo "COMMANDS : $equipmentNames\n";
+                        if (!empty($cmdId)) {
+                            $actionExecuted = $this->executeActions($response, $profile);
+                            $equipmentNames = $this->getHumanName($response['id'], "cmd");
+                            if ($this->debug) echo "COMMANDS : $equipmentNames\n";
+                        }else{
+                            $actionExecuted = false;
+                        }   
                         break;
                     case 'camera': //************* CAMERA *********************************************************************************** */
                     
@@ -1094,20 +1267,39 @@ class JeedomAssistant {
                             }
 
                             // Boucle sur chaque ID et exécute la commande correspondante
-                            $responseCameras = "";
-                            foreach ($cmdIds as $id) {
-                                if (!empty($id)) {
-                                    $equipmentName = $this->getHumanName($id, "eqlogic");
-                                    if ($this->debug) echo "CAMERA $equipmentName : analyse IA\n";
-                                    //$equipmentNames = $equipmentName."\n";
-                                    //$this->sendCameraNotification($notificationProfile, $equipmentName, $notificationCommand, $id);
-                                    $responseCamera = $this->executeCamera($response, $profile, $id); //TODO : retour mono type? pas object ou bool?
-                                    if(!($responseCamera===false)){
-                                        $responseCameras .= $responseCamera['response']."\n";
-                                    }
-                                }
+                            // $responseCameras = "";
+                            // foreach ($cmdIds as $id) {
+                            //     if (!empty($id)) {
+                            //         $equipmentName = $this->getHumanName($id, "eqlogic");
+                            //         if ($this->debug) echo "CAMERA $equipmentName : analyse IA\n";
+                            //         //$equipmentNames = $equipmentName."\n";
+                            //         //$this->sendCameraNotification($notificationProfile, $equipmentName, $notificationCommand, $id);
+                            //         //TODO : envoyer toutes les images pour analyse en une fois?
+                            //         $responseCamera = $this->executeCamera($response, $profile, $id); //TODO : retour mono type? pas object ou bool?
+                            //         if(!($responseCamera===false)){
+                            //             $responseCameras .= $responseCamera['response']."\n";
+                            //         }
+                            //     }
+                            // }
+                            // $response['response']=$responseCameras; //TODO : que la réponse?   
+
+                            // ✅ Analyse de toutes les caméras en une seule fois
+                            if ($this->debug) {
+                                $cameraNames = $this->getHumanName(implode(',', $cmdIds), "eqlogic");
+                                echo "CAMERAS : analyse IA de " . count($cmdIds) . " caméra(s)\n";
+                                if (!empty($cameraNames)) echo "  → $cameraNames\n";
                             }
-                            $response['response']=$responseCameras; //TODO : que la réponse?     
+
+                            // Appel unique avec tous les IDs de caméras
+                            $responseCamera = $this->executeCamera($response, $profile, $cmdIds);
+
+                            if ($responseCamera !== false && isset($responseCamera['response'])) {
+                                $response['response'] = $responseCamera['response'];
+                            } else {
+                                $response['response'] = "❌ Impossible d'analyser les caméras.";
+                            }     
+                        }else{
+                            $actionExecuted = false;
                         }
                         break;
                     default:
@@ -1172,79 +1364,125 @@ class JeedomAssistant {
    * @return string|false Le contenu de l'image JPEG ou false en cas d'erreur
    */
   function getCameraImage($eqLogicId) {
-      try {
-          echo "getCameraImage($eqLogicId)\n";
-          // Récupération de l'équipement
-          $eqLogic = eqLogic::byId($eqLogicId);
+    try {
+        echo "getCameraImage($eqLogicId)\n";
+        // Récupération de l'équipement
+        $eqLogic = eqLogic::byId($eqLogicId);
 
-          if (!is_object($eqLogic)) {
-              if ($this->debug) echo "Équipement introuvable : ID $eqLogicId";
-              return false;
-          }
+        if (!is_object($eqLogic)) {
+            if ($this->debug) echo "Équipement introuvable : ID $eqLogicId";
+            return false;
+        }
 
-          // Recherche de la commande avec le LogicalId "urlFlux"
-          $cmd = null;
-          foreach ($eqLogic->getCmd() as $command) {
-              if ($command->getLogicalId() == 'urlFlux') {
-                  $cmd = $command;
-                  break;
-              }
-          }
+        // Recherche de la commande avec le LogicalId "urlFlux"
+        $cmd = null;
+        foreach ($eqLogic->getCmd() as $command) {
+            if ($command->getLogicalId() == 'urlFlux') {
+                $cmd = $command;
+                break;
+            }
+        }
 
-          if (!is_object($cmd)) {
-              if ($this->debug) echo "Commande 'urlFlux' introuvable pour l'équipement ID $eqLogicId";
-              return false;
-          }
+        if (!is_object($cmd)) {
+            if ($this->debug) echo "Commande 'urlFlux' introuvable pour l'équipement ID $eqLogicId";
+            return false;
+        }
 
-          // Récupération de l'URL du flux
-          $urlFlux = $cmd->execCmd();
-          if (empty($urlFlux)) {
-              if ($this->debug) echo "URL du flux vide pour l'équipement ID $eqLogicId";
-              return false;
-          }
+        // Récupération de l'URL du flux
+        $urlFlux = $cmd->execCmd();
+        if (empty($urlFlux)) {
+            if ($this->debug) echo "URL du flux vide pour l'équipement ID $eqLogicId";
+            return false;
+        }
 
-          //Recupération du host local
-          $internalAddr = config::byKey('internalAddr', 'core', 'localhost');
-          if (empty($internalAddr)) {
-              if ($this->debug) echo "Adresse réseau interne Jeedom vide";
-              return false;
-          }
-          $internalPort = config::byKey('internalPort', 'core', '80');
-          if (empty($internalPort)) {
-              if ($this->debug) echo "Port réseau interne Jeedom vide";
-              return false;
-          }
-        
-          $urlFlux = "http://".$internalAddr.":".$internalPort."/".$urlFlux;
-        
-          // Récupération de l'image depuis l'URL
-          $context = stream_context_create([
-              'http' => [
-                  'timeout' => 10, // Timeout de 10 secondes
-                  'ignore_errors' => true
-              ]
-          ]);
+        //Recupération du host local
+        $internalAddr = config::byKey('internalAddr', 'core', 'localhost');
+        if (empty($internalAddr)) {
+            if ($this->debug) echo "Adresse réseau interne Jeedom vide";
+            return false;
+        }
+        $internalPort = config::byKey('internalPort', 'core', '80');
+        if (empty($internalPort)) {
+            if ($this->debug) echo "Port réseau interne Jeedom vide";
+            return false;
+        }
+    
+        $urlFlux = "http://".$internalAddr.":".$internalPort."/".$urlFlux;
+    
+        // Récupération de l'image depuis l'URL
+        $context = stream_context_create([
+            'http' => [
+                'timeout' => 10, // Timeout de 10 secondes
+                'ignore_errors' => true
+            ]
+        ]);
 
-          $imageData = @file_get_contents($urlFlux, false, $context);
+        $imageData = @file_get_contents($urlFlux, false, $context);
 
-          if ($imageData === false) {
-              if ($this->debug) echo "Impossible de récupérer l'image depuis l'URL : $urlFlux";
-              return false;
-          }
+        if ($imageData === false) {
+            if ($this->debug) echo "Impossible de récupérer l'image depuis l'URL : $urlFlux";
+            return false;
+        }
 
-          // Vérification que c'est bien une image JPEG
-          if (strpos($imageData, "\xFF\xD8\xFF") !== 0) {
-              if ($this->debug) echo "Le contenu récupéré ne semble pas être une image JPEG valide";
-          }
+        // Vérification que c'est bien une image JPEG
+        if (strpos($imageData, "\xFF\xD8\xFF") !== 0) {
+            if ($this->debug) echo "Le contenu récupéré ne semble pas être une image JPEG valide";
+        }
 
-          if ($this->debug) echo "Image récupérée avec succès depuis l'équipement ID $eqLogicId (" . strlen($imageData) . " octets)";
+        if ($this->debug) echo "Image récupérée avec succès depuis l'équipement ID $eqLogicId (" . strlen($imageData) . " octets)";
 
-          return $imageData;
+        if ($imageData !== false) {
+            $originalSize = strlen($imageData);
 
-      } catch (Exception $e) {
-          if ($this->debug) echo "Erreur lors de la récupération de l'image : " . $e->getMessage();
-          return false;
-      }
+            // ✅ Compression et redimensionnement de l'image
+            $image = imagecreatefromstring($imageData);
+            if ($image !== false) {
+                $width = imagesx($image);
+                $height = imagesy($image);
+                $maxSize = 1024; // Optimal pour analyse IA (255 tokens vs 765 tokens pour 1920px)
+
+                if ($width > $maxSize || $height > $maxSize) {
+                    // Redimensionnement nécessaire
+                    $ratio = min($maxSize / $width, $maxSize / $height);
+                    $newWidth = (int)($width * $ratio);
+                    $newHeight = (int)($height * $ratio);
+
+                    if ($this->debug) {
+                        echo "📐 Redimensionnement: {$width}x{$height} → {$newWidth}x{$newHeight}\n";
+                    }
+
+                    $resized = imagecreatetruecolor($newWidth, $newHeight);
+                    imagecopyresampled($resized, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+
+                    ob_start();
+                    imagejpeg($resized, null, 85); // Qualité 85% (bon compromis qualité/taille)
+                    $imageData = ob_get_clean();
+
+                    imagedestroy($resized);
+
+                    $newSize = strlen($imageData);
+                    $reduction = round((1 - $newSize / $originalSize) * 100);
+
+                    if ($this->debug) {
+                        echo "✅ Compression: " . number_format($originalSize) . " → " . number_format($newSize) . " octets (-{$reduction}%)\n";
+                    }
+                } else {
+                    if ($this->debug) {
+                        echo "ℹ️ Image déjà optimale ({$width}x{$height}), pas de redimensionnement\n";
+                    }
+                }
+
+                imagedestroy($image);
+            } else {
+                if ($this->debug) echo "⚠️ Impossible de décoder l'image pour compression\n";
+            }
+        }
+        return $imageData;
+
+    } catch (Exception $e) {
+        if ($this->debug) echo "Erreur lors de la récupération de l'image : " . $e->getMessage();
+        return false;
+    }
   }
 
     /**

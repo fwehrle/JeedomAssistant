@@ -2,7 +2,7 @@
 
 /* Classe d'utilisation de l'API assistant d'OpenAI
 * @author Franck WEHRLE avec l'aide de Claude.ai qui m'a conseillé chatGPT parce qu'elle n'avait pas de gestion de thread ;)
-* @version 2.01
+* @version 2.02
 */
 
 // ============================================
@@ -180,7 +180,7 @@ class OpenAIAssistant {
     /**
      * Appel API générique
      */
-    private function apiCall($method, $endpoint, $data = null) {
+    private function apiCall($method, $endpoint, $data = null, $retryCount = 0, $maxRetries = 3) {
         if (empty($endpoint)) {
             throw new Exception("Endpoint vide");
         }
@@ -217,6 +217,19 @@ class OpenAIAssistant {
 
         if ($error) {
             throw new Exception("Erreur cURL: $error");
+        }
+
+        // ✅ Gestion des erreurs temporaires avec retry
+        if ($httpCode >= 500 && $httpCode < 600) {
+            // Erreurs serveur (500, 502, 503, 504...)
+            if ($retryCount < $maxRetries) {
+                $waitTime = pow(2, $retryCount); // Backoff exponentiel : 1s, 2s, 4s
+                if ($this->debug) {
+                    echo "⚠️ Erreur $httpCode (tentative " . ($retryCount + 1) . "/$maxRetries), retry dans {$waitTime}s...\n";
+                }
+                sleep($waitTime);
+                return $this->apiCall($method, $endpoint, $data, $retryCount + 1, $maxRetries);
+            }
         }
 
         if ($httpCode >= 400) {
@@ -346,7 +359,7 @@ class OpenAIAssistant {
             
             if($return['isError']){
               if ($this->debug) echo "Run échoué: " . json_encode($return) . "\n";
-              if ($this->debug) echo "ERREUR de run : ".  $return['last_error']['code'] . "-" . $return['last_error']['code'] . "\n";
+              if ($this->debug) echo "ERREUR de runAssistant : ".  $return['last_error']['code'] . "-" . $return['last_error']['code'] . "\n";
               if($return['last_error']['code'] == 'rate_limit_exceeded'){
                 //TODO 	// gérer l'erreur et relancer? ici ou plus haut
               }
@@ -361,9 +374,17 @@ class OpenAIAssistant {
         } catch (Exception $e) {
             $endTime = microtime(true);
             $duration = round($endTime - $startTime, 3);
+
+            $errorMsg = $e->getMessage();
             echo "❌ Échec runAssistant après {$duration}s\n";
-            //TODO : remonter l'erreur pour prévenir l'utilisateur par retour de notification ?
-            throw $e; // Re-lancer l'exception ?
+
+            // ✅ Détection d'erreur 502/503 (temporaire)
+            if (preg_match('/Erreur API \((502|503|504)\)/', $errorMsg)) {
+                echo "⚠️ Erreur serveur temporaire détectée (OpenAI surchargé)\n";
+                echo "💡 Conseil : Réessayez dans quelques secondes\n";
+            }
+
+            throw $e;
         }
     }
     
@@ -417,27 +438,29 @@ class OpenAIAssistant {
     
     /**
      * Récupérer les messages
+     * @param string $threadId ID du thread
+     * @param int $limit Nombre de messages à récupérer (Ne pas limiter à 1 pour éviter de ne récupérer que les messages intermédiaires hors assistant)
+     * @param string|null $sentMessageId ID du message utilisateur envoyé (optionnel)
+     * @return array Tableau de messages
      */
-    public function getMessages($threadId, $limit = 1, $sentMessageId = null) {
+    public function getMessages($threadId, $limit = 5, $sentMessageId = null) {
+        if ($this->debug) echo "getMessages $limit \n";
         if(empty($sentMessageId)){
             $response = $this->apiCall('GET', "/threads/$threadId/messages?limit=$limit");
+            if ($this->debug) echo "Dernier Messages : " . count($response['data']) . " message(s)\n";
+        
         }else{
             $response = $this->apiCall('GET', "/threads/$threadId/messages?after=$sentMessageId&limit=3&order=asc");
+            if ($this->debug) echo "Messages après $sentMessageId : " . count($response['data']) . " message(s)\n";
         }
 
-        if ($this->debug) {
-            echo "Messages après $sentMessageId : " . count($response['data']) . " message(s)\n";
-        }
-        
+                
         // Trouver le premier message assistant
         $return = null;
         foreach ($response['data'] as $msg) {
             if ($msg['role'] === 'assistant') {
                 $return = $msg; //['content'][0]['text']['value'];
-                
-                if ($this->debug) {
-                    echo "✅ Réponse trouvée (ID: {$msg['id']})\n";
-                }
+                if ($this->debug) echo "✅ Réponse trouvée (ID: {$msg['id']})\n";
                 break;
             }
         }
@@ -522,19 +545,15 @@ class OpenAIAssistant {
             $assistantConfig['instructions'],
             $model
         );
-        //if ($this->debug) echo "ask assistantConfig Name :".$assistantConfig['name']."\n";
-        //if ($this->debug) echo "ask assistantConfig Name :".$assistantConfig['model']."\n";
-        //if ($this->debug) echo "ask assistantConfig Name :".$assistantConfig['instructions']."\n";
       
       	$threadId = $this->getOrCreateThread($profile);
-        
+        if ($this->debug)  echo "assistantId: $assistantId ThreadId: $threadId\n";
+
         // ✅ Sauvegarder l'ID du message envoyé
         $sentMessage = $this->addMessage($threadId, $message);
         $sentMessageId = $sentMessage['id'];
-        
-        if ($this->debug) {
-            echo "Message utilisateur envoyé avec ID: $sentMessageId\n";
-        }
+        if ($this->debug)  echo "Message utilisateur envoyé avec ID: $sentMessageId\n";
+
         // Exécuter l'assistant        
         $run = $this->runAssistant($threadId, $assistantId, $modelOverride);
         if($run['isError']){
@@ -556,8 +575,9 @@ class OpenAIAssistant {
             ];
         }else{
             // Récupérer la réponse
-            $messages = $this->getMessages($threadId, 1);
+            $messages = $this->getMessages($threadId, 5, $sentMessageId);
             $return = $messages[0]['content'][0]['text']['value'];
+            if ($this->debug) echo "Message: $return\n";
         }        
         
         // Petit délai pour permettre la synchronisation du thread
@@ -656,30 +676,53 @@ class OpenAIAssistant {
  * Ajouter un message avec image à un thread (format Vision API)
  * @param string $threadId ID du thread
  * @param string $textContent Texte du message
- * @param string $fileId ID du fichier uploadé
+ * @param string $fileIds IDs du/des fichier uploadé
  * @return array Réponse de l'API
  */
-    public function addMessageWithImage($threadId, $textContent, $fileId) {
+    public function addMessageWithImage($threadId, $textContent, $fileIds) {
         if ($this->debug) echo "addMessageWithImage\n";
         $startTime = microtime(true); // 🕒 Démarre le chronomètre
 
-        $messageData = [
-            'role' => 'user',
-            'content' => [
-                [
-                    'type' => 'text',
-                    'text' => $textContent
-                ],
-                [
+        // Construction du contenu du message
+        $content = [
+            [
+                'type' => 'text',
+                'text' => $textContent
+            ]
+        ];
+        
+        // ✅ Gérer un seul file_id OU un tableau de file_ids
+        if (is_string($fileIds)) {
+            // Un seul file_id (comportement actuel)
+            $content[] = [
+                'type' => 'image_file',
+                'image_file' => [
+                    'file_id' => $fileIds
+                ]
+            ];
+        } elseif (is_array($fileIds)) {
+            // Plusieurs file_ids
+            foreach ($fileIds as $fileId) {
+                $content[] = [
                     'type' => 'image_file',
                     'image_file' => [
                         'file_id' => $fileId
                     ]
-                ]
-            ]
+                ];
+            }
+        }
+        
+        $messageData = [
+            'role' => 'user',
+            'content' => $content
         ];
-		//echo "Message data: " . json_encode($messageData, JSON_PRETTY_PRINT) . "\n";
-    
+        
+        if ($this->debug) {
+            $imageCount = is_array($fileIds) ? count($fileIds) : 1;
+            echo "Message avec $imageCount image(s)\n";
+            // echo "Message data: " . json_encode($messageData, JSON_PRETTY_PRINT) . "\n";
+        }
+
         $return = $this->apiCall('POST', "/threads/$threadId/messages", $messageData);
         $endTime = microtime(true); // 🕒 Stoppe le chronomètre
         $duration = round($endTime - $startTime, 3); // Temps en secondes
@@ -689,15 +732,20 @@ class OpenAIAssistant {
     }
 
     /**
-     * Poser une question avec une image
+     * Poser une question avec une ou plusieurs images
      * @param string $profile Profil utilisateur
      * @param string $message Texte de la question
-     * @param string|null $imageData Données binaires de l'image (optionnel)
-     * @param string $filename Nom du fichier image
      * @param array|null $assistantConfig Configuration de l'assistant
+     * @param array|null $images Tableau d'images avec format:
+     *                           [
+     *                             ['data' => $imageData1, 'filename' => 'image1.jpg'],
+     *                             ['data' => $imageData2, 'filename' => 'image2.jpg'],
+     *                             ...
+     *                           ]
+     * @param string|null $modelOverride Modèle à utiliser
      * @return string Réponse de l'assistant
      */
-    public function askWithImage($profile, $message, $assistantConfig = null, $imageData = null, $filename = 'image.jpg', $modelOverride = null) {
+    public function askWithImage($profile, $message, $assistantConfig = null, $images = null, $modelOverride = null) {
         // Configuration par défaut de l'assistant avec support vision
         if ($assistantConfig === null) {
             if ($this->debug) echo "Config Assistant par defaut avec support vision";
@@ -714,33 +762,46 @@ class OpenAIAssistant {
                 'model' => $this->modelVision // gpt-4o ou gpt-4-turbo pour vision
             ];
         }
-        
+
       	$model = $modelOverride ?? ($assistantConfig['model'] ?? $this->modelVision);
     	if ($this->debug) echo "Utilisation du modèle: $model\n";
-    
+
         $assistantId = $this->getOrCreateAssistant(
             $assistantConfig['name'],
             $assistantConfig['instructions'],
             $model
         );
-        
+
         $threadId = $this->getOrCreateThread($profile);
-        
-        // Si une image est fournie, l'uploader d'abord
-        $fileId = null;
-        if ($imageData !== null) {
-            if ($this->debug) echo "Upload de l'image ".$filename."...\n";
-            $fileResponse = $this->uploadImage($imageData, $filename);
-            $fileId = $fileResponse['id'];
-            if ($this->debug) echo "Image uploadée avec ID: $fileId\n";
-            
-            // Ajouter le message avec l'image
-            $this->addMessageWithImage($threadId, $message, $fileId);
+
+        // ✅ Upload des images et récupération des file IDs
+        $fileIds = [];
+
+        if ($images !== null && is_array($images)) {
+            if ($this->debug) echo "Upload de " . count($images) . " image(s)...\n";
+
+            foreach ($images as $idx => $image) {
+                $imageData = $image['data'] ?? null;
+                $imageName = $image['filename'] ?? "image_{$idx}.jpg";
+
+                if ($imageData !== null) {
+                    if ($this->debug) echo "  - Upload image $imageName...\n";
+                    $fileResponse = $this->uploadImage($imageData, $imageName);
+                    $fileIds[] = $fileResponse['id'];
+                    if ($this->debug) echo "    Uploadée avec ID: {$fileResponse['id']}\n";
+                }
+            }
+        }
+
+        // Ajouter le message avec image(s) ou texte seul
+        if (!empty($fileIds)) {
+            // Message avec une ou plusieurs images
+            $this->addMessageWithImage($threadId, $message, count($fileIds) === 1 ? $fileIds[0] : $fileIds);
         } else {
             // Message texte simple
             $this->addMessage($threadId, $message);
         }
-        
+
         // Exécuter l'assistant
         $run = $this->runAssistant($threadId, $assistantId, $model);
         if($run['isError']){
@@ -762,13 +823,107 @@ class OpenAIAssistant {
             ];
         }else{
             // Récupérer la réponse
-            $messages = $this->getMessages($threadId, 1);
+            $messages = $this->getMessages($threadId, 5);
             $return = $messages[0]['content'][0]['text']['value'];
         }        
         
         usleep(500000); // 0.5 seconde
-        
+
         return $return;
+    }
+
+    /**
+     * Appel direct à l'API Chat Completion (sans assistant/thread)
+     * Méthode rapide pour des requêtes simples sans historique
+     *
+     * @param string $systemPrompt Instructions système pour l'IA
+     * @param string $userMessage Message de l'utilisateur
+     * @param string $model Modèle à utiliser (défaut: gpt-4o-mini)
+     * @return string Réponse de l'IA en texte brut
+     */
+    public function chatCompletion($systemPrompt, $userMessage, $model = 'gpt-4o-mini') {
+        if ($this->debug) echo "chatCompletion avec modèle: $model\n";
+        $startTime = microtime(true);
+
+        try {
+            // Construction de la requête pour l'API Chat Completion
+            $requestData = [
+                'model' => $model,
+                'messages' => [
+                    [
+                        'role' => 'system',
+                        'content' => $systemPrompt
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => $userMessage
+                    ]
+                ],
+                'temperature' => 0.7,
+                'max_tokens' => 500 // Limite pour réponses courtes (extraction de pièces)
+            ];
+
+            if ($this->debug) {
+                echo "Requête Chat Completion: " . json_encode($requestData, JSON_PRETTY_PRINT) . "\n";
+            }
+
+            // Appel direct à l'API Chat Completion
+            $url = $this->baseUrl.'/chat/completions';
+
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($requestData));
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . $this->apiKey
+            ]);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $error = curl_error($ch);
+            curl_close($ch);
+
+            if ($error) {
+                throw new Exception("Erreur cURL: $error");
+            }
+
+            if ($httpCode >= 400) {
+                throw new Exception("Erreur API ($httpCode): " . substr($response, 0, 300));
+            }
+
+            $responseData = json_decode($response, true);
+
+            if ($responseData === null) {
+                throw new Exception("Réponse JSON invalide: " . substr($response, 0, 200));
+            }
+
+            // Extraire le contenu de la réponse
+            if (!isset($responseData['choices'][0]['message']['content'])) {
+                throw new Exception("Format de réponse invalide: " . json_encode($responseData));
+            }
+
+            $content = $responseData['choices'][0]['message']['content'];
+
+            $endTime = microtime(true);
+            $duration = round($endTime - $startTime, 3);
+
+            if ($this->debug) {
+                echo "⏱️ Temps d'exécution chatCompletion : {$duration}s\n";
+                echo "📊 Tokens utilisés: " . ($responseData['usage']['total_tokens'] ?? 'N/A') . "\n";
+            }
+
+            return $content;
+
+        } catch (Exception $e) {
+            $endTime = microtime(true);
+            $duration = round($endTime - $startTime, 3);
+            echo "❌ Échec chatCompletion après {$duration}s: " . $e->getMessage() . "\n";
+
+            // Retourner un JSON d'erreur
+            return json_encode(['error' => $e->getMessage()]);
+        }
     }
 
 }
