@@ -4,7 +4,7 @@
  * Version simplifiée utilisant la classe JeedomAssistant
  * 
  * @author Franck WEHRLE
- * @version 2.0
+ * @version 2.01
  * 
  * Tags nécessaires:
  * - #profile# : Nom de l'utilisateur (obligatoire)
@@ -37,7 +37,7 @@ $config = [
   
     // Équipements à exclure
     'equipements_exclus' => [
-        "Prise", "Volets", "Résumé", "Dodo", "Eteindre", "Météo Bischwiller", "Pollens"
+        "Prise", "Volets", "Résumé", "Dodo", "Eteindre", "Météo Bischwiller", "Pollens", "Caméra Tablette Salon"
     ],
     
     // Catégories d'actions autorisées "heating","security","energy","automatism","multimedia","default" 
@@ -47,7 +47,7 @@ $config = [
     'eq_cmd_exclus' => ["Rafraichir", "binaire", "Thumbnail"],
     
     // Debug (mettre à true pour voir les détails)
-    'debug' => false,
+    'debug' => true,
     'debug_eq' => false,
     'debug_eq_detail' => false,
     'debug_dont_run_action' => false
@@ -88,7 +88,7 @@ $notificationCommand = isset($tags['#command#']) ? $tags['#command#'] : '';
 
 try {
     echo "\n\n******************************************\n";
-  	echo "\nInitialisation de l'assistant Jeedom\n";
+  	echo date('[Y-m-d H:i:s] ') . "Initialisation de l'assistant Jeedom\n";
     $assistant = new JeedomAssistant($config);
     
     $scenario->setLog("📝 Question de $profile: $question");
@@ -106,12 +106,11 @@ try {
         
         // Afficher les détails de la réponse
         $response = $result['response'];
-        if (!empty($response['piece'])) {
-            $scenario->setLog("📍 Pièce(s): " . $response['piece']);
-        }
-        if (!empty($response['id'])) {
-            $scenario->setLog("🔗 Commande ID: " . $response['id']);
-        }
+        if (!empty($response['piece']))  $scenario->setLog("📍 Pièce(s): " . $response['piece']);
+        if (!empty($response['id'])) $scenario->setLog("🔗 Commande ID: " . $response['id']);
+        if (!empty($response['action'])) $scenario->setLog("🔗 Action: " . $response['action']);
+		if (!empty($response['type action'])) $scenario->setLog("🔗 Type action: " . $response['type action']);
+
         $scenario->setLog("📊 Confiance: " . $response['confidence']);
         
     } else {
@@ -139,7 +138,7 @@ try {
      echo "senario introuvabvle\n"; 
     }
 }
-echo "FIN de l'assistant Jeedom\n \n ";
+echo date('[Y-m-d H:i:s] ') . "FIN de l'assistant Jeedom\n \n ";
 // ============================================
 // EXEMPLES D'UTILISATION AVANCÉE
 // ============================================
@@ -176,6 +175,5 @@ $assistant->reset();
 $jeedomJson = $assistant->collectJeedomData(['Salon', 'Cuisine'], 'info');
 echo $jeedomJson;
 */
-
 
 ?>

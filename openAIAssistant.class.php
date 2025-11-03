@@ -2,7 +2,7 @@
 
 /* Classe d'utilisation de l'API assistant d'OpenAI
 * @author Franck WEHRLE avec l'aide de Claude.ai qui m'a conseillé chatGPT parce qu'elle n'avait pas de gestion de thread ;)
-* @version 2.0
+* @version 2.01
 */
 
 // ============================================
@@ -27,7 +27,6 @@ class OpenAIAssistant {
       	//$this->configFile = $configFile;
         $this->apiKey = $apiKey;
         $this->debug = $debug;
-        
     }
     
       /**
@@ -345,6 +344,14 @@ class OpenAIAssistant {
             //TODO : remonter l'erreur pour prévenir l'utilisateur par retour de notification ?
             $return = $this->waitForRunCompletion($threadId, $run['id']);
             
+            if($return['isError']){
+              if ($this->debug) echo "Run échoué: " . json_encode($return) . "\n";
+              if ($this->debug) echo "ERREUR de run : ".  $return['last_error']['code'] . "-" . $return['last_error']['code'] . "\n";
+              if($return['last_error']['code'] == 'rate_limit_exceeded'){
+                //TODO 	// gérer l'erreur et relancer? ici ou plus haut
+              }
+            }
+
             $endTime = microtime(true);
             $duration = round($endTime - $startTime, 3);
             if ($this->debug) echo "⏱️ Temps d'exécution runAssistant : {$duration}s\n";
@@ -356,7 +363,7 @@ class OpenAIAssistant {
             $duration = round($endTime - $startTime, 3);
             echo "❌ Échec runAssistant après {$duration}s\n";
             //TODO : remonter l'erreur pour prévenir l'utilisateur par retour de notification ?
-            throw $e; // Re-lancer l'exception
+            throw $e; // Re-lancer l'exception ?
         }
     }
     
@@ -364,12 +371,17 @@ class OpenAIAssistant {
      * Attendre la fin de l'exécution
      */
     private function waitForRunCompletion($threadId, $runId, $maxAttempts = 30) {
-        usleep(500000);
+        $delays = [0.5, 0.5, 1, 1, 2, 2, 3, 3, 3]; // Délais progressifs
+        //usleep(500000);
         for ($i = 0; $i < $maxAttempts; $i++) {
+            $delay = $delays[min($i, count($delays) - 1)];
+            usleep($delay * 1000000);
+        
             $run = $this->apiCall('GET', "/threads/$threadId/runs/$runId");
             
             if ($run['status'] === 'completed') {
                 if ($this->debug) echo "run complete after ".$i." attempts\n";
+                $run['isError']= false;
                 return $run;
             }
             
@@ -377,6 +389,7 @@ class OpenAIAssistant {
                 // Afficher le détail complet de l'erreur
                 $errorMsg = "Run échoué: " . $run['status'];
                 
+                $run['isError']= true;
                 // Récupérer les détails de l'erreur si disponibles
                 if (isset($run['last_error'])) {
                     $errorMsg .= "\nCode: " . ($run['last_error']['code'] ?? 'unknown');
@@ -387,23 +400,54 @@ class OpenAIAssistant {
                 echo "Structure complète du run en échec:\n";
                 echo json_encode($run, JSON_PRETTY_PRINT) . "\n";
                 
-                throw new Exception($errorMsg);
+                return $run;
             }
             
             // Afficher le statut actuel pour debug
             if ($this->debug) echo "Run status: " . $run['status'] . " (attempt " . ($i + 1) . ")\n";
             
-            sleep(1);
+            //sleep(1);
         }
         
-        throw new Exception("Timeout en attendant la réponse");
+        $run['isError']= true;
+        $errorMsg = "Run échoué: Timeout en attendant la réponse";
+        return $run;
+        //throw new Exception("Timeout en attendant la réponse");
     }
     
     /**
      * Récupérer les messages
      */
-    public function getMessages($threadId, $limit = 1) {
-        $response = $this->apiCall('GET', "/threads/$threadId/messages?limit=$limit");
+    public function getMessages($threadId, $limit = 1, $sentMessageId = null) {
+        if(empty($sentMessageId)){
+            $response = $this->apiCall('GET', "/threads/$threadId/messages?limit=$limit");
+        }else{
+            $response = $this->apiCall('GET', "/threads/$threadId/messages?after=$sentMessageId&limit=3&order=asc");
+        }
+
+        if ($this->debug) {
+            echo "Messages après $sentMessageId : " . count($response['data']) . " message(s)\n";
+        }
+        
+        // Trouver le premier message assistant
+        $return = null;
+        foreach ($response['data'] as $msg) {
+            if ($msg['role'] === 'assistant') {
+                $return = $msg; //['content'][0]['text']['value'];
+                
+                if ($this->debug) {
+                    echo "✅ Réponse trouvée (ID: {$msg['id']})\n";
+                }
+                break;
+            }
+        }
+        
+        // Fallback si rien trouvé
+        if ($return === null) {
+            if ($this->debug) echo "⚠️ Fallback: utilisation du dernier message\n";
+            $response = $this->apiCall('GET', "/threads/$threadId/messages?limit=$limit");
+        }
+        
         return $response['data'];
     }
     
@@ -484,20 +528,43 @@ class OpenAIAssistant {
       
       	$threadId = $this->getOrCreateThread($profile);
         
-        $this->addMessage($threadId, $message);
+        // ✅ Sauvegarder l'ID du message envoyé
+        $sentMessage = $this->addMessage($threadId, $message);
+        $sentMessageId = $sentMessage['id'];
         
-        $this->runAssistant($threadId, $assistantId, $modelOverride); //$this->$model);
-        
-        // Récupérer la réponse
-        $messages = $this->getMessages($threadId, 1);
-        $response = $messages[0]['content'][0]['text']['value'];
+        if ($this->debug) {
+            echo "Message utilisateur envoyé avec ID: $sentMessageId\n";
+        }
+        // Exécuter l'assistant        
+        $run = $this->runAssistant($threadId, $assistantId, $modelOverride);
+        if($run['isError']){
+            //if ($this->debug) echo "Run échoué: " . json_encode($run) . "\n";
+            $response = $run['last_error']['message']." (".$run['last_error']['code'].")";   
+            if ($this->debug) echo "ERREUR de run : ".  $response . "\n";
+            if($run['last_error']['code'] == 'rate_limit_exceeded'){
+              //TODO 	// gérer l'erreur et relancer?
+              $response = "Veuillez réessayer plus tard, limite de taux dépassée ($response).";
+            }
+            $return = [
+                'question' => $message,
+                'response' => $response,
+                'piece' => '',
+                'id' => '',
+                'mode' => 'info',
+                'confidence' => 'high',
+                'type action' => ''
+            ];
+        }else{
+            // Récupérer la réponse
+            $messages = $this->getMessages($threadId, 1);
+            $return = $messages[0]['content'][0]['text']['value'];
+        }        
         
         // Petit délai pour permettre la synchronisation du thread
         // Important si vous faites plusieurs appels successifs au même thread
         usleep(500000); // 0.5 seconde
-      	//echo "ask message :".$message."\n";
-        //echo "ask reponse :".$response."\n"; 
-        return $response;
+
+        return $return;
     }
     
     /**
@@ -675,15 +742,33 @@ class OpenAIAssistant {
         }
         
         // Exécuter l'assistant
-        $this->runAssistant($threadId, $assistantId, $model);
-        
-        // Récupérer la réponse
-        $messages = $this->getMessages($threadId, 1);
-        $response = $messages[0]['content'][0]['text']['value'];
+        $run = $this->runAssistant($threadId, $assistantId, $model);
+        if($run['isError']){
+            //if ($this->debug) echo "Run échoué: " . json_encode($run) . "\n";
+            $response = $run['last_error']['message']." (".$run['last_error']['code'].")";   
+            if ($this->debug) echo "ERREUR de run : ".  $response . "\n";
+            if($run['last_error']['code'] == 'rate_limit_exceeded'){
+                //TODO 	// gérer l'erreur et relancer?
+                $response = "Veuillez réessayer plus tard, limite de taux dépassée ($response).";
+            }
+            $return = [
+                'question' => $message,
+                'response' => $response,
+                'piece' => '',
+                'id' => '',
+                'mode' => 'info',
+                'confidence' => 'high',
+                'type action' => ''
+            ];
+        }else{
+            // Récupérer la réponse
+            $messages = $this->getMessages($threadId, 1);
+            $return = $messages[0]['content'][0]['text']['value'];
+        }        
         
         usleep(500000); // 0.5 seconde
         
-        return $response;
+        return $return;
     }
 
 }

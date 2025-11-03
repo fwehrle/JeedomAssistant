@@ -6,7 +6,7 @@
  * et d'exécuter les actions recommandées
  * 
  * @author Franck WEHRLE
- * @version 2.01
+ * @version 2.0
  */
 /**
  * ┌─────────────────┬───────┬──────────────┬──────────────┬─────────────────────────┐
@@ -42,7 +42,6 @@ require_once '/var/www/html/plugins/script/data/jeedomAssistant/openAIAssistant.
 class JeedomAssistant {
     
     // Configuration
-    private $jeedomStatusFile = '/tmp/jeedom_status.json';
     private $openaiApiKey;
     private $openaiModel;
     private $openaiVisionModel;
@@ -231,42 +230,6 @@ class JeedomAssistant {
             echo "Équipements collectés:\n$json\n\n";
         }
         
-        // ========================================
-        // AJOUT : Sauvegarde dans un fichier JSON
-        // ========================================
-        if ($this->debugEq) {
-            try {
-                $statusFile = $this->jeedomStatusFile;
-                
-                // Créer un objet avec métadonnées
-                // $statusData = [
-                //     'timestamp' => date('Y-m-d H:i:s'),
-                //     'mode' => $mode,
-                //     'pieces' => $pieces,
-                //     'count_pieces' => count($this->jeedomCommands),
-                //     'total_equipments' => array_sum(array_map('count', $this->jeedomCommands)),
-                //     'size_bytes' => strlen($json),
-                //     'equipments' => $this->jeedomCommands
-                // ];
-                
-                // $statusJson = json_encode($statusData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-                $statusJson = $json;
-                // Écrire dans le fichier (écrasement)
-                $result = file_put_contents($statusFile, $statusJson);
-                
-                if ($result === false) {
-                    if ($this->debug) echo "⚠️ Impossible d'écrire dans $statusFile\n";
-                } else {
-                    if ($this->debug) echo "✅ État sauvegardé dans $statusFile (" . number_format($result) . " octets)\n";
-                }
-                
-            } catch (Exception $e) {
-                if ($this->debug) echo "⚠️ Erreur sauvegarde status: " . $e->getMessage() . "\n";
-                // Ne pas interrompre le flux en cas d'erreur
-            }
-        }
-        // ========================================
-
         return $json;
     }
     
@@ -469,32 +432,32 @@ class JeedomAssistant {
                 "- type action = \"camera\" : Pour toutes demandes d'information relatives à de l'analyse d'image des caméras de surveillance (obligatoire si tu renvois un ID de camera dans le champ id \n\n" .
                           
                 "# RÈGLES POUR LES ACTIONS\n" .
-                "Avant d'executer une action :\n" .
+                "Avant de proposer une action :\n" .
                 "1. Vérifie l'état actuel de l'équipement dans le JSON fourni :\n" .
-                " - Pour les volets, portes et vannes : le champs 'Etat' vaut : 0 si l'équipement est ouvert et 1 si l'équipement est fermé\n" .
-                " - Pour les fenêtres : le champs 'Etat' vaut : 0 si l'équipement est fermé, et 1 si l'équipement est ouvert\n" .
-                " - Pour les lumières : le champs 'Etat' vaut : 0 si l'équipement est éteind, et 1 ou un valeur positive si l'équipement est allumé\n" .
-                " - Pour les autres équipements : le champs 'Etat' vaut : 0 si l'équipement est éteind, arrêté ou inactif, et 1 ou une valeur positive si l'équipement est allumé, en marche ou actif\n" .
-                " - Pour les actions  : 'On' veut dire allumer, 'Off' veut dire éteindre. Monter veut dire ouvrir, et descendre veut dire fermer\n" .
+          " - Pour les équipements volets, portes et vannes : le champs 'Etat' vaut : 0 si l'équipement est ouvert et 1 si l'équipement est fermé\n" .
+          " - Pour les équipements fenêtre : le champs 'Etat' vaut : 0 si l'équipement est fermé, et 1 si l'équipement est ouvert\n" .
+          " - Pour les équipements lumière : le champs 'Etat' vaut : 0 si l'équipement est éteind, et 1 ou un valeur positive si l'équipement est allumé\n" .
+          " - Pour les autres équipements : le champs 'Etat' vaut : 0 si l'équipement est éteind, arrêté ou inactif, et 1 ou une valeur positive si l'équipement est allumé, en marche ou actif\n" .
+          " - Pour les actions  : On veut dire allumer, Off veut dire éteindre. Monter veut dire ouvrir, et descendre veut dire fermer\n" .
           		"2. Vérifie SYSTEMATIQUEMENT l'état de l'équipement dans le json envoyé\n" .
                 "3. Si l'équipement est déjà dans l'état demandé, réponds : \"[Équipement] est déjà [état].\"\n" .
                 "4. Si l'action est nécessaire, fournis l'ID de la ou les commandes et mode=\"action\"\n" .
                 "5. Si plusieurs équipements correspondent, demande de préciser ou liste les options\n\n" .
-                "6. Si tu renvois \"type action\" = \"camera\", ne réponds jamais sur ce que tu vois sur une image ou une caméra si il n'y a pas d'image dans mon message. Attends de pouvoir analyser l'image \n\n" .
+                
                 "# RÈGLES DE SÉCURITÉ\n" .
-                "- N'execute une action que si tu es CERTAIN de la réponse (confidence=\"high\")\n" .
+                "- Ne réponds que si tu es CERTAIN de la réponse (confidence=\"high\")\n" .
                 "- Si tu n'es pas sûr, indique confidence=\"medium\" ou \"low\" et explique pourquoi\n" .
                 "- Si aucune question n'est posée, réponds : {\"question\":\"\",\"response\":\"Aucune question détectée.\",\"piece\":\"\",\"id\":\"\",\"mode\":\"info\",\"confidence\":\"high\"}\n" .
                 "- Si l'ID de commande n'est pas trouvé dans le JSON, laisse \"id\" vide et explique dans \"response\"\n\n" .
                 
-        //        "# RÈGLES AVANCÉES\n" .
+                "# RÈGLES AVANCÉES\n" .
                 //"- Si plusieurs actions sont demandées, retourne un tableau 'actions' : [{\"id\":\"123\",\"action\":\"on\"},{\"id\":\"456\",\"action\":\"off\"}]\n" .
-        //        "- Pour les températures, précise l'unité (°C)\n" .
-        //        "- Pour les pourcentages (volets, luminosité), indique la valeur actuelle et cible\n" .
-        //        "- Si une action risque d'être gênante (éteindre toutes les lumières la nuit) ou dangereuse (ouvrir le garage, ouvrir la piscine), demande confirmation\n\n" .
+                "- Pour les températures, précise l'unité (°C)\n" .
+                "- Pour les pourcentages (volets, luminosité), indique la valeur actuelle et cible\n" .
+                "- Si une action risque d'être gênante (éteindre toutes les lumières la nuit) ou dangereuse (ouvrir le garage, ouvrir la piscine), demande confirmation\n\n" .
                 
                 "# STYLE DE RÉPONSE\n" .
-                "- Sois précis, naturel et concis. Fais des réponses courtes\n" .
+                "- Sois naturel, amical et concis\n" .
                 "- Utilise des retours à la ligne (\\n) pour les réponses multi-phrases\n" .
                 "- Personnalise avec le prénom $profile si pertinent\n" .
                 "- Ajoute des emojis légers si approprié (🌡️ 💡 🚪)\n\n" .
@@ -510,14 +473,14 @@ class JeedomAssistant {
                 "Question : \"Quelle est la température du salon ?\"\n" .
                 "{\"question\":\"Quelle est la température du salon ?\",\"response\":\"🌡️ La température du salon est actuellement de 21.5°C.\",\"piece\":\"salon\",\"id\":\"456\",\"mode\":\"info\",\"confidence\":\"high\",\"type action\":\"\"}\n\n" .
                 
-        //        "Question ambiguë : \"Allume la lumière\"\n" .
-        //        "{\"question\":\"Allume la lumière\",\"response\":\"J'ai trouvé plusieurs lumières : salon, cuisine, chambre.\\nQuelle lumière veux-tu allumer ?\",\"piece\":\"\",\"id\":\"\",\"mode\":\"info\",\"confidence\":\"low\",\"type action\":\"\"}\n\n" .
+                "Question ambiguë : \"Allume la lumière\"\n" .
+                "{\"question\":\"Allume la lumière\",\"response\":\"J'ai trouvé plusieurs lumières : salon, cuisine, chambre.\\nQuelle lumière veux-tu allumer ?\",\"piece\":\"\",\"id\":\"\",\"mode\":\"info\",\"confidence\":\"low\",\"type action\":\"\"}\n\n" .
                 
                 "Question : \"Montre-moi le salon\"\n" .
                 "{\"question\":\"Montre-moi le salon\",\"response\":\"Je regarde sur les caméras.\",\"piece\":\"salon\",\"id\":\"\",\"mode\":\"action\",\"confidence\":\"high\",\"type action\":\"camera\"}\n\n" .
           
                 "# GESTION DU CONTEXTE\n" .
-        //        "- Utilise l'historique de la conversation pour comprendre les références implicites (\"et dans la cuisine aussi?\", \"éteins-la\") mais PAS pour déduire les états des équiepements. Récupère les toujurs dans le json fournis à chaque question\n" .
+                "- Utilise l'historique de la conversation pour comprendre les références implicites (\"et dans la cuisine aussi?\", \"éteins-la\") mais PAS pour déduire les états des équiepements. Récupère les toujurs dans le json fournis à chaque question\n" .
                 "- Mémorise les préférences exprimées par $profile\n" .
                 "- Si une pièce a été mentionnée récemment, c'est probablement celle concernée par \"ici\" ou \"là\"\n",
             
@@ -590,10 +553,9 @@ class JeedomAssistant {
         if ($this->debug) echo "Interrogation de l'assistant IA\n";
         
         if (!empty($imageData) && $imageData !== false) {
-            if ($this->debug) echo "Analyse d'image : askWithImage\n";
+            if ($this->debug) echo "Analyse d'image\n";
 			$response = $this->ai->askWithImage($profile, $message, $assistantConfig, $imageData, $filename, $this->openaiVisionModel);
     	}else{
-             if ($this->debug) echo "Analyse de texte : ask\n";
              $response = $this->ai->ask($profile, $message, $assistantConfig, $this->openaiModel);
         }
         
@@ -904,7 +866,7 @@ class JeedomAssistant {
      * $this->sendNotification('Franck', 'Vue des caméras', 'telegram', '123,456,789');
      */
     public function sendCameraNotification($profile, $message, $command = '', $eqLogicId_Camera = null) {
-        if ($this->debug) echo "Envoi notification avec CAMERA $eqLogicId_Camera à $profile: $message\n";
+        if ($this->debug) echo "Envoi notification à $profile: $message\n";
         
         // === ENVOI DES IMAGES DE CAMÉRAS (SI DEMANDÉ) ===
         if (!empty($eqLogicId_Camera)) {
@@ -932,7 +894,7 @@ class JeedomAssistant {
                         echo "L'équipement ID $cameraId n'est pas une caméra\n";
                         continue;
                     }
-                   
+                    
                     $cameraName = $eqLogic->getHumanName();
                     //if ($this->debug) echo "Envoi snapshot de la caméra: $cameraName\n";
                     
@@ -956,15 +918,6 @@ class JeedomAssistant {
                         continue;
                     }
                     
-                    //Activer la camera si désactivée
-                    $isDesactivated = false;
-                    if($eqLogic->getIsEnable() == 0){
-                      $isDesactivated = true;
-                      $eqLogic->setIsEnable(1);
-                      $eqLogic->save();
-                      if ($this->debug) echo "Activation de la caméra ID $cameraId avant capture\n";
-                    }
-
                     $messageNotif = (empty($message)?$cameraName:$message);
                     // Options : nombre de captures, message, désactiver les notifications internes, ne pas envoyer la première capture
                     $options = [
@@ -992,14 +945,8 @@ class JeedomAssistant {
                     
                     // Exécuter la commande sendSnapshot
                     $sendSnapshotCmd->execCmd($execParams);
+                    
                     if ($this->debug) echo "Snapshot envoyé avec succès pour la caméra: $cameraName\n";
-
-                    if($isDesactivated){
-                      //Désactiver la camera si elle l'était avant
-                      $eqLogic->setIsEnable(0);
-                      $eqLogic->save();
-                      if ($this->debug) echo "Désactivation de la caméra ID $cameraId après capture\n";
-                    }   
                     
                 } catch (Exception $e) {
                     if ($this->debug) echo "Erreur lors de l'envoi du snapshot pour la caméra ID $cameraId: " . $e->getMessage() . "\n";
@@ -1064,56 +1011,55 @@ class JeedomAssistant {
            }
          	
             // Exécuter l'action si nécessaire
-            $equipmentNames = ""; 
-            //TODO : parfois, type action = camera alors que mode = info
-          	if ($response['mode'] === 'action' || $response['type action']==='camera') { /************************************************************************************ */
-                $actionResponse = $this->isExecutableAction($response, $profile);
-                switch ($response['type action']) {
-                    case 'command': /************** COMMAND ********************************************************************************* */
-                        $actionExecuted = $this->executeActions($response, $profile);
-                        $equipmentNames = $this->getHumanName($response['id'], "cmd");
-                        if ($this->debug) echo "COMMANDS : $equipmentNames\n";
-                        break;
-                    case 'camera': //************* CAMERA *********************************************************************************** */
-                    
-                        $cmdId = $response['id'];
-                        if (!empty($cmdId)) {
-                            //$equipmentNames = $this->getHumanName($response['id'], "eqlogic");
-                            $this->sendMessageNotification($notificationProfile, $response['response'], $notificationCommand);
-                            //$this->sendMessageNotification($notificationProfile, "Voici les images des caméras", $notificationCommand);
-                            // Sépare les ID multiples (ex: "123,456,789") et supprime les espaces inutiles
-                            $cmdIds = array_map('trim', explode(',', $cmdId));
-                            // Boucle sur chaque ID et envoi snapshot des camera avant analyse
-                            foreach ($cmdIds as $id) {
-                                if (!empty($id)) {
-                                    $equipmentName = $this->getHumanName($id, "eqlogic");
-                                    if ($this->debug) echo "CAMERA $equipmentName : envoi snapshot\n";
-                                    $equipmentNames = $equipmentName."\n";
-                                    $this->sendCameraNotification($notificationProfile, $equipmentName, $notificationCommand, $id);
-                                }
-                            }
+            $equipmentNames = "";
+          	if ($response['mode'] === 'action') { /************************************************************************************ */
+               $actionResponse = $this->isExecutableAction($response, $profile);
+               switch ($response['type action']) {
+                  case 'command': /************** COMMAND ********************************************************************************* */
+                      $actionExecuted = $this->executeActions($response, $profile);
+                      $equipmentNames = $this->getHumanName($response['id'], "cmd");
+                      if ($this->debug) echo "COMMANDS : $equipmentNames\n";
+                      break;
+                  case 'camera': //************* CAMERA *********************************************************************************** */
+                   
+                      $cmdId = $response['id'];
+                      if (!empty($cmdId)) {
+                          //$equipmentNames = $this->getHumanName($response['id'], "eqlogic");
+                          $this->sendMessageNotification($notificationProfile, $response['response'], $notificationCommand);
+                          //$this->sendMessageNotification($notificationProfile, "Voici les images des caméras", $notificationCommand);
+                          // Sépare les ID multiples (ex: "123,456,789") et supprime les espaces inutiles
+                          $cmdIds = array_map('trim', explode(',', $cmdId));
+                          // Boucle sur chaque ID et envoi snapshot des camera avant analyse
+                          foreach ($cmdIds as $id) {
+                              if (!empty($id)) {
+                                  $equipmentName = $this->getHumanName($id, "eqlogic");
+                                  if ($this->debug) echo "CAMERA : $equipmentName\n";
+                                  $equipmentNames = $equipmentName."\n";
+                                  $this->sendCameraNotification($notificationProfile, $equipmentName, $notificationCommand, $id);
+                              }
+                          }
 
-                            // Boucle sur chaque ID et exécute la commande correspondante
-                            $responseCameras = "";
-                            foreach ($cmdIds as $id) {
-                                if (!empty($id)) {
-                                    $equipmentName = $this->getHumanName($id, "eqlogic");
-                                    if ($this->debug) echo "CAMERA $equipmentName : analyse IA\n";
-                                    //$equipmentNames = $equipmentName."\n";
-                                    //$this->sendCameraNotification($notificationProfile, $equipmentName, $notificationCommand, $id);
-                                    $responseCamera = $this->executeCamera($response, $profile, $id); //TODO : retour mono type? pas object ou bool?
-                                    if(!($responseCamera===false)){
-                                        $responseCameras .= $responseCamera['response']."\n";
-                                    }
-                                }
-                            }
-                            $response['response']=$responseCameras; //TODO : que la réponse?     
-                        }
-                        break;
-                    default:
-                        echo "Type d'Action ".$response['type action']." non géré\n";
-                        $actionResponse = "Type d'Action ".$response['type action']." non géré";
-                        break;
+                          // Boucle sur chaque ID et exécute la commande correspondante
+                          $responseCameras = "";
+                          foreach ($cmdIds as $id) {
+                              if (!empty($id)) {
+                                  $equipmentName = $this->getHumanName($id, "eqlogic");
+                                  if ($this->debug) echo "CAMERA : $equipmentName\n";
+                                  //$equipmentNames = $equipmentName."\n";
+                                  $this->sendCameraNotification($notificationProfile, $equipmentName, $notificationCommand, $id);
+                                  $responseCamera = $this->executeCamera($response, $profile, $id); //TODO : retour mono type? pas object ou bool?
+                                  if(!($responseCamera===false)){
+                                    $responseCameras .= $responseCamera['response']."\n";
+                                  }
+                              }
+                          }
+                          $response['response']=$responseCameras; //TODO : que la réponse?     
+                      }
+                      break;
+                  default:
+                      echo "Type d'Action ".$response['type action']." non géré\n";
+                   	  $actionResponse = "Type d'Action ".$response['type action']." non géré";
+                      break;
                 }
             }else{
               $actionExecuted = false;
@@ -1126,7 +1072,7 @@ class JeedomAssistant {
             }
             
           	//DEBUG : Recuperation des noms des equipements ou commandes
-            //if(!empty($equipmentNames)) $notificationMsg .= " \n".$equipmentNames;
+            if(!empty($equipmentNames)) $notificationMsg .= " \n".$equipmentNames;
                        
             // Envoyer la notification
             $this->sendMessageNotification($notificationProfile, $notificationMsg, $notificationCommand);
