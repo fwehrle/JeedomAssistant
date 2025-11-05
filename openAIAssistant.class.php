@@ -2,7 +2,7 @@
 
 /* Classe d'utilisation de l'API assistant d'OpenAI
 * @author Franck WEHRLE avec l'aide de Claude.ai qui m'a conseillé chatGPT parce qu'elle n'avait pas de gestion de thread ;)
-* @version 2.02
+* @version 2.04
 */
 
 // ============================================
@@ -15,6 +15,7 @@ class OpenAIAssistant {
     private $model = 'gpt-4o-mini'; // 'gpt-4o-mini' ou 'gpt-4o', 'gpt-4-turbo' ('gpt-4o', 'gpt-4-turbo' pour vision)
     private $modelVision = 'gpt-4o'; //'gpt-4-turbo'
     private $debug;
+    private $threadMaxAge = 3600; // Durée de vie max d'un thread en secondes (1h par défaut)
 
     public function __construct($apiKey, $debug = false, $configFile = null) {
       if ($this->debug) echo "__construct\n";
@@ -28,7 +29,57 @@ class OpenAIAssistant {
         $this->apiKey = $apiKey;
         $this->debug = $debug;
     }
-    
+
+    /**
+     * Configurer la durée de vie maximale des threads
+     *
+     * @param int $seconds Durée en secondes (3600 = 1h, 7200 = 2h, etc.)
+     * @return void
+     */
+    public function setThreadMaxAge($seconds) {
+        $this->threadMaxAge = (int)$seconds;
+        if ($this->debug) {
+            $hours = round($seconds / 3600, 1);
+            echo "Durée de vie des threads configurée à {$hours}h ({$seconds}s)\n";
+        }
+    }
+
+    /**
+     * Obtenir la durée de vie maximale des threads
+     *
+     * @return int Durée en secondes
+     */
+    public function getThreadMaxAge() {
+        return $this->threadMaxAge;
+    }
+
+    /**
+     * Forcer la création d'un nouveau thread pour un profile
+     * Utile pour réinitialiser l'historique manuellement
+     *
+     * @param string $profile Nom du profil utilisateur
+     * @return string Nouvel ID de thread
+     */
+    public function resetThread($profile) {
+        $config = $this->loadConfig();
+        $now = time();
+
+        // Créer un nouveau thread
+        $thread = $this->createThread();
+        $threadId = $thread['id'];
+
+        $config['threads'][$profile] = [
+            'id' => $threadId,
+            'last_used' => $now,
+            'created_at' => $now
+        ];
+        $this->saveConfig($config);
+
+        if ($this->debug) echo "Thread réinitialisé pour $profile, nouveau thread: $threadId\n";
+
+        return $threadId;
+    }
+
       /**
      * Récupérer l'historique d'un thread
      * 
@@ -51,7 +102,9 @@ class OpenAIAssistant {
             ];
         }
 
-        $threadId = $config['threads'][$profile];
+        // Supporter l'ancien format (string) et le nouveau format (array)
+        $threadData = $config['threads'][$profile];
+        $threadId = is_string($threadData) ? $threadData : $threadData['id'];
 
         try {
             // Récupérer les messages
@@ -359,7 +412,7 @@ class OpenAIAssistant {
             
             if($return['isError']){
               if ($this->debug) echo "Run échoué: " . json_encode($return) . "\n";
-              if ($this->debug) echo "ERREUR de runAssistant : ".  $return['last_error']['code'] . "-" . $return['last_error']['code'] . "\n";
+              if ($this->debug) echo "ERREUR de run : ".  $return['last_error']['code'] . "-" . $return['last_error']['code'] . "\n";
               if($return['last_error']['code'] == 'rate_limit_exceeded'){
                 //TODO 	// gérer l'erreur et relancer? ici ou plus haut
               }
@@ -498,20 +551,69 @@ class OpenAIAssistant {
     }
     
     /**
-     * Obtenir ou créer un thread pour une pièce
+     * Obtenir ou créer un thread pour un profile
+     * Si le dernier thread a plus d'1h, crée un nouveau thread pour purger l'historique
      */
     public function getOrCreateThread($profile) {
         $config = $this->loadConfig();
-        
+        $now = time();
+
+        // Vérifier si un thread existe pour ce profile
         if (!empty($config['threads'][$profile])) {
-            return $config['threads'][$profile];
+            $threadData = $config['threads'][$profile];
+
+            // Ancien format (juste l'ID) - migration automatique
+            if (is_string($threadData)) {
+                if ($this->debug) echo "Migration ancien format de thread pour $profile\n";
+                $threadId = $threadData;
+                $lastUsed = $now; // Considérer comme récent pour ne pas le supprimer immédiatement
+            } else {
+                // Nouveau format avec timestamp
+                $threadId = $threadData['id'];
+                $lastUsed = $threadData['last_used'] ?? 0;
+            }
+
+            // Vérifier l'âge du thread
+            $age = $now - $lastUsed;
+
+            if ($age < $this->threadMaxAge) {
+                // Thread récent, on le réutilise et met à jour le timestamp
+                if ($this->debug) {
+                    $ageMinutes = round($age / 60, 1);
+                    echo "Réutilisation du thread $threadId pour $profile (dernier usage: {$ageMinutes} min)\n";
+                }
+
+                $config['threads'][$profile] = [
+                    'id' => $threadId,
+                    'last_used' => $now,
+                    'created_at' => $threadData['created_at'] ?? $now
+                ];
+                $this->saveConfig($config);
+
+                return $threadId;
+            } else {
+                // Thread trop ancien, on en crée un nouveau
+                $ageHours = round($age / 3600, 1);
+                if ($this->debug) {
+                    echo "Thread trop ancien pour $profile ({$ageHours}h), création d'un nouveau thread\n";
+                }
+            }
         }
-        
+
+        // Créer un nouveau thread
         $thread = $this->createThread();
-        $config['threads'][$profile] = $thread['id'];
+        $threadId = $thread['id'];
+
+        $config['threads'][$profile] = [
+            'id' => $threadId,
+            'last_used' => $now,
+            'created_at' => $now
+        ];
         $this->saveConfig($config);
-        
-        return $thread['id'];
+
+        if ($this->debug) echo "Nouveau thread créé: $threadId pour $profile\n";
+
+        return $threadId;
     }
     
     /**
@@ -577,7 +679,7 @@ class OpenAIAssistant {
             // Récupérer la réponse
             $messages = $this->getMessages($threadId, 5, $sentMessageId);
             $return = $messages[0]['content'][0]['text']['value'];
-            if ($this->debug) echo "Message: $return\n";
+            //if ($this->debug) echo "Message: $return\n";
         }        
         
         // Petit délai pour permettre la synchronisation du thread

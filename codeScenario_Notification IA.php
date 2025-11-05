@@ -4,7 +4,7 @@
  * Version simplifiée utilisant la classe JeedomAssistant
  * 
  * @author Franck WEHRLE
- * @version 2.01
+ * @version 2.04
  * 
  * Tags nécessaires:
  * - #profile# : Nom de l'utilisateur (obligatoire)
@@ -40,7 +40,7 @@ $config = [
         "Prise", "Volets", "Résumé", "Dodo", "Eteindre", "Météo Bischwiller", "Pollens", "Caméra Tablette Salon"
     ],
     
-    // Catégories d'actions autorisées "heating","security","energy","automatism","multimedia","default" 
+    // Catégories d'actions autorisées "light", "opening", "heating","security","energy","automatism","multimedia","default" 
     'eq_action_inclus_categories' => ["light", "opening", "heating", "security"],
     
     // Commandes à exclure
@@ -93,6 +93,12 @@ try {
   	echo date('[Y-m-d H:i:s] ') . "Initialisation de l'assistant Jeedom\n";
     $assistant = new JeedomAssistant($config);
     
+    // Optionnel : Configurer la durée de vie des threads (1 heures)
+    $assistant->setThreadMaxAge(3600);
+
+    // Forcer un nouveau thread
+    //$assistant->resetThread("Franck");
+
     $scenario->setLog("📝 Question de $profile: $question");
     echo "📝 Question de $profile: $question\n";
 
@@ -122,14 +128,14 @@ try {
         $scenario->setLog("📊 Confiance: " . $response['confidence']);
         
     } else {
-        $errorMsg = "❌ Erreur scenario: " . $result['error'];
+        $errorMsg = "❌ Erreur scénario: " . $result['error'];
         echo $errorMsg."\n";
         $assistant->sendMessageNotification($profile, $errorMsg, $notificationCommand);
         $scenario->setLog($errorMsg);
     }
     
 } catch (Exception $e) {
-    $errorMsg = "❌ Exception scenario: " . $e->getMessage();
+    $errorMsg = "❌ Exception scénario: " . $e->getMessage();
     echo $errorMsg."\n";
     $scenario->setLog($errorMsg);
     
@@ -143,103 +149,8 @@ try {
         $scenario2->setTags($tags2);
         $scenario2->launch();
     }else{
-     echo "senario introuvabvle\n"; 
+     echo "scénario introuvable\n"; 
     }
 }
 echo date('[Y-m-d H:i:s] ') . "FIN de l'assistant Jeedom\n \n ";
-// ============================================
-// EXEMPLES D'UTILISATION AVANCÉE
-// ============================================
-
-/*
-// Exemple 1: Utilisation directe sans process()
-$assistant = new JeedomAssistant($config);
-
-// Juste poser une question
-$response = $assistant->ask('Franck', 'Quelle est la température du salon?');
-echo $response['response'];
-
-// Exécuter manuellement l'action
-if ($response['mode'] === 'action' && $response['confidence'] === 'high') {
-    $assistant->executeAction($response, 'Franck');
-}
-
-// Envoyer la notification
-$assistant->sendNotification('Franck', $response['response']);
-
-
-// Exemple 2: Récupérer l'historique
-$history = $assistant->getHistory('Franck', 10);
-foreach ($history as $msg) {
-    echo "[{$msg['role']}] {$msg['content']}\n";
-}
-
-
-// Exemple 3: Réinitialiser le contexte
-$assistant->reset();
-
-
-// Exemple 4: Collecter uniquement les données sans poser de question
-$jeedomJson = $assistant->collectJeedomData(['Salon', 'Cuisine'], 'info');
-echo $jeedomJson;
-
-
-// Exemple 5: Analyser une seule image de caméra
-$cameraId = 123; // ID de l'équipement caméra Jeedom
-$imageData = $assistant->getCameraImage($cameraId);
-$images = [
-    ['data' => $imageData, 'filename' => 'camera_salon.jpg']
-];
-$result = $assistant->process('Franck', 'Y a-t-il quelqu\'un dans le salon ?', null, 'action', 'telegram', $images);
-
-
-// Exemple 6: Analyser plusieurs images de caméras simultanément
-$cameraIds = [123, 456, 789]; // IDs des caméras: salon, jardin, garage
-$images = [];
-
-foreach ($cameraIds as $idx => $cameraId) {
-    $imageData = $assistant->getCameraImage($cameraId);
-    if ($imageData !== false) {
-        $images[] = [
-            'data' => $imageData,
-            'filename' => "camera_{$idx}.jpg"
-        ];
-    }
-}
-
-$result = $assistant->process(
-    'Franck',
-    'Compare ces 3 caméras et dis-moi s\'il y a des anomalies ou de l\'activité suspecte',
-    null,
-    'action',
-    'telegram',
-    $images
-);
-echo $result['message'];
-
-
-// Exemple 7: Utilisation avec analyse automatique des pièces (optimisation)
-// SANS $analysePieces (ancien comportement - charge TOUTES les pièces):
-$result = $assistant->process('Franck', 'Quelle est la température du salon ?', null, 'action', 'telegram', null, false);
-// → Charge les données de TOUTES les pièces (~30 KB JSON, ~7500 tokens, ~20s)
-
-// AVEC $analysePieces (nouveau - charge uniquement les pièces nécessaires):
-$result = $assistant->process('Franck', 'Quelle est la température du salon ?', null, 'action', 'telegram', null, true);
-// → Étape 1: Identifie "salon" (~50 tokens, ~2s)
-// → Étape 2: Charge uniquement les données du salon (~3 KB JSON, ~750 tokens, ~5s)
-// → TOTAL: ~800 tokens, ~7s (90% plus rapide !)
-
-
-// Exemple 8: Cas où l'analyse préliminaire est utile
-$result = $assistant->process('Franck', 'Éteins les lumières de la cuisine et du salon', null, 'action', 'telegram', null, true);
-// → Identifie automatiquement ["cuisine", "salon"]
-// → Charge uniquement les données de ces 2 pièces au lieu de toutes
-
-
-// Exemple 9: Analyse préliminaire désactivée si pièces déjà spécifiées
-$result = $assistant->process('Franck', 'Quelle température ?', ['Salon'], 'action', 'telegram', null, true);
-// → $analysePieces ignoré car $pieces est déjà défini
-// → Charge directement les données du salon
-*/
-
 ?>

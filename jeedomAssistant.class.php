@@ -6,7 +6,7 @@
  * et d'exécuter les actions recommandées
  * 
  * @author Franck WEHRLE
- * @version 2.02
+ * @version 2.04
  */
 /**
  * ┌─────────────────┬───────┬──────────────┬──────────────┬─────────────────────────┐
@@ -140,7 +140,38 @@ class JeedomAssistant {
           //echo "JeedomAssistant initialisé avec le modèle: {$this->openaiModel}\n";
         }
     }
-    
+
+    /**
+     * Obtenir l'instance OpenAIAssistant pour accéder aux méthodes avancées
+     *
+     * @return OpenAIAssistant Instance de l'assistant OpenAI
+     */
+    public function getAI() {
+        return $this->ai;
+    }
+
+    /**
+     * Configurer la durée de vie maximale des threads
+     * Méthode de commodité pour $assistant->getAI()->setThreadMaxAge()
+     *
+     * @param int $seconds Durée en secondes (3600 = 1h, 7200 = 2h, etc.)
+     * @return void
+     */
+    public function setThreadMaxAge($seconds) {
+        $this->ai->setThreadMaxAge($seconds);
+    }
+
+    /**
+     * Forcer la création d'un nouveau thread pour un profile
+     * Méthode de commodité pour $assistant->getAI()->resetThread()
+     *
+     * @param string $profile Nom du profil utilisateur
+     * @return string Nouvel ID de thread
+     */
+    public function resetThread($profile) {
+        return $this->ai->resetThread($profile);
+    }
+
     /**
      * Collecter les informations des équipements Jeedom
      * 
@@ -444,7 +475,7 @@ class JeedomAssistant {
             'name' => 'Assistant Domotique Jeedom',
             'instructions' => 
                 "# RÔLE\n" .
-                "Tu es Jarvis, un assistant domotique intelligent pour Jeedom. Je m'appelle $profile.\n\n" .
+                "Tu es Jarvis, un assistant domotique intelligent pour Jeedom.\n\n" .
                 
                 "# FORMAT DE RÉPONSE OBLIGATOIRE\n" .
                 "Tu dois TOUJOURS répondre UNIQUEMENT avec un objet JSON valide (sans markdown, sans backticks).\n" .
@@ -470,6 +501,7 @@ class JeedomAssistant {
                 "# RÈGLES POUR LES ACTIONS\n" .
                 "Avant d'executer une action :\n" .
                 "1. Vérifie l'état actuel de l'équipement dans le JSON fourni :\n" .
+                " - Pour la porte de garage : le champs 'Etat' vaut : 0 si la porte est ouverte et 1 si elle est fermée\n" .
                 " - Pour les volets, portes et vannes : le champs 'Etat' vaut : 0 si l'équipement est ouvert et 1 si l'équipement est fermé\n" .
                 " - Pour les fenêtres : le champs 'Etat' vaut : 0 si l'équipement est fermé, et 1 si l'équipement est ouvert\n" .
                 " - Pour les lumières : le champs 'Etat' vaut : 0 si l'équipement est éteind, et 1 ou un valeur positive si l'équipement est allumé\n" .
@@ -495,7 +527,7 @@ class JeedomAssistant {
                 "# STYLE DE RÉPONSE\n" .
                 "- Sois précis, naturel et concis. Fais des réponses courtes\n" .
                 "- Utilise des retours à la ligne (\\n) pour les réponses multi-phrases\n" .
-                "- Personnalise avec le prénom $profile si pertinent\n" .
+                "- Personnalise avec le prénom si pertinent\n" .
                 "- Ajoute des emojis légers si approprié (🌡️ 💡 🚪)\n\n" .
                 
                 "# EXEMPLES DE RÉPONSES ATTENDUES\n" .
@@ -517,7 +549,7 @@ class JeedomAssistant {
           
                 "# GESTION DU CONTEXTE\n" .
         //        "- Utilise l'historique de la conversation pour comprendre les références implicites (\"et dans la cuisine aussi?\", \"éteins-la\") mais PAS pour déduire les états des équiepements. Récupère les toujurs dans le json fournis à chaque question\n" .
-                "- Mémorise les préférences exprimées par $profile\n" .
+                "- Mémorise les préférences exprimées par chaque utilisateur\n" .
                 "- Si une pièce a été mentionnée récemment, c'est probablement celle concernée par \"ici\" ou \"là\"\n",
             
             'model' => $this->openaiModel
@@ -559,6 +591,9 @@ class JeedomAssistant {
         $message = $question;
         if ($this->debug) echo "📝 Taille de la question initiale: " . strlen($question) . " octets\n";
         
+        if(!empty($profile)) {
+            $message = "C'est " . $profile . ". " . $message;
+        }   
         if($sendJeedomData === true) {
             // Collecter les données Jeedom
             $jeedomJson = $this->collectJeedomData($pieces, $mode);
@@ -1239,16 +1274,17 @@ class JeedomAssistant {
                 $actionResponse = $this->isExecutableAction($response, $profile);
                 switch ($response['type action']) {
                     case 'command': /************** COMMAND ********************************************************************************* */
+                        $cmdId = $response['id'];
                         if (!empty($cmdId)) {
                             $actionExecuted = $this->executeActions($response, $profile);
                             $equipmentNames = $this->getHumanName($response['id'], "cmd");
                             if ($this->debug) echo "COMMANDS : $equipmentNames\n";
                         }else{
+                            if ($this->debug) echo "COMMANDS : Pas d'ID\n";
                             $actionExecuted = false;
                         }   
                         break;
                     case 'camera': //************* CAMERA *********************************************************************************** */
-                    
                         $cmdId = $response['id'];
                         if (!empty($cmdId)) {
                             //$equipmentNames = $this->getHumanName($response['id'], "eqlogic");
