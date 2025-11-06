@@ -1,10 +1,10 @@
 <?php
 /**
- * Scénario d'interrogation d'une IA (OpenAI Assistant)
+ * Scénario d'interrogation d'une IA (OpenAIChat)
  * Version simplifiée utilisant la classe JeedomAssistant
  * 
  * @author Franck WEHRLE
- * @version 2.04
+ * @version 2.05
  * 
  * Tags nécessaires:
  * - #profile# : Nom de l'utilisateur (obligatoire)
@@ -93,11 +93,11 @@ try {
   	echo date('[Y-m-d H:i:s] ') . "Initialisation de l'assistant Jeedom\n";
     $assistant = new JeedomAssistant($config);
     
-    // Optionnel : Configurer la durée de vie des threads (1 heures)
-    $assistant->setThreadMaxAge(3600);
+    // Optionnel : Configurer la durée de vie des Conversations (1 heures)
+    $assistant->setConversationMaxAge(3600);
 
-    // Forcer un nouveau thread
-    //$assistant->resetThread("Franck");
+    // Forcer un nouveau Conversation
+    //$assistant->resetConversation("Franck");
 
     $scenario->setLog("📝 Question de $profile: $question");
     echo "📝 Question de $profile: $question\n";

@@ -6,7 +6,7 @@
  * et d'exécuter les actions recommandées
  * 
  * @author Franck WEHRLE
- * @version 2.04
+ * @version 2.05
  */
 /**
  * ┌─────────────────┬───────┬──────────────┬──────────────┬─────────────────────────┐
@@ -37,7 +37,7 @@
  *   - gpt-4o       : ~$5-10/mois
  *   - gpt-4-turbo  : ~$15-30/mois
  * */
-require_once '/var/www/html/plugins/script/data/jeedomAssistant/openAIAssistant.class.php';
+require_once '/var/www/html/plugins/script/data/jeedomAssistant/openAIChat.class.php';
 
 class JeedomAssistant {
     
@@ -132,7 +132,7 @@ class JeedomAssistant {
             throw new Exception("La clé API OpenAI est requise");
         }
         
-        $this->ai = new OpenAIAssistant($this->openaiApiKey, $this->debug, $this->configFile);
+        $this->ai = new OpenAIChat($this->openaiApiKey, $this->debug, $this->configFile);
         
         if ($this->debug) {
             echo "JeedomAssistant initialisé en mode DEBUG avec le modèle: {$this->openaiModel}\n";
@@ -142,34 +142,34 @@ class JeedomAssistant {
     }
 
     /**
-     * Obtenir l'instance OpenAIAssistant pour accéder aux méthodes avancées
+     * Obtenir l'instance OpenAIChat pour accéder aux méthodes avancées
      *
-     * @return OpenAIAssistant Instance de l'assistant OpenAI
+     * @return OpenAIChat Instance de l'assistant OpenAI
      */
     public function getAI() {
         return $this->ai;
     }
 
     /**
-     * Configurer la durée de vie maximale des threads
-     * Méthode de commodité pour $assistant->getAI()->setThreadMaxAge()
+     * Configurer la durée de vie maximale des conversations
+     * Méthode de commodité pour $assistant->getAI()->setConversationMaxAge()
      *
      * @param int $seconds Durée en secondes (3600 = 1h, 7200 = 2h, etc.)
      * @return void
      */
-    public function setThreadMaxAge($seconds) {
-        $this->ai->setThreadMaxAge($seconds);
+    public function setConversationMaxAge($seconds) {
+        $this->ai->setConversationMaxAge($seconds);
     }
 
     /**
-     * Forcer la création d'un nouveau thread pour un profile
-     * Méthode de commodité pour $assistant->getAI()->resetThread()
+     * Réinitialiser l'historique de conversation pour un profil
+     * Méthode de commodité pour $assistant->getAI()->resetConversation()
      *
      * @param string $profile Nom du profil utilisateur
-     * @return string Nouvel ID de thread
+     * @return bool Succès ou échec
      */
-    public function resetThread($profile) {
-        return $this->ai->resetThread($profile);
+    public function resetConversation($profile) {
+        return $this->ai->resetConversation($profile);
     }
 
     /**
@@ -557,7 +557,7 @@ class JeedomAssistant {
     }
     
     /**
-     * Poser une question à l'assistant
+     * Poser une question à l'assistant via Chat Completion avec historique
      *
      * @param string $profile Nom du profil utilisateur
      * @param string $question Question à poser
@@ -567,8 +567,8 @@ class JeedomAssistant {
      * @param array|null $images Tableau d'images: [['data' => $imageData, 'filename' => 'image.jpg'], ...]
      * @return array Réponse parsée
      */
-    public function askAssistant($profile, $question, $pieces = null, $mode = 'action', $sendJeedomData = true, $images = null) {
-        if ($this->debug) echo "jeedomAssistant ask : ".$question."\n";
+    public function askChat($profile, $question, $pieces = null, $mode = 'action', $sendJeedomData = true, $images = null) {
+        if ($this->debug) echo "jeedomAssistant askChat : ".$question."\n";
         $startTime = microtime(true);
 
         // Gestion des commandes spéciales
@@ -942,7 +942,7 @@ class JeedomAssistant {
         if ($this->debug) echo "🤖 Question IA : $question\n";
 
         // Appel à l'IA avec toutes les images
-        $response2 = $this->askAssistant($profile, $question, $response['piece'], null, false, $images);
+        $response2 = $this->askChat($profile, $question, $response['piece'], null, false, $images);
 
         $endTime = microtime(true);
         $duration = round($endTime - $startTime, 3);
@@ -1261,10 +1261,10 @@ class JeedomAssistant {
             // Poser la question principale
            if (!empty($images) && is_array($images)) {
             if ($this->debug) echo "PROCESS CAMERA : pieces:" . (is_array($pieces) ? implode(',', $pieces) : $pieces) . " mode:$mode \n";
-			$response = $this->askAssistant($profile, $question, $pieces, $mode, false, $images);
+			$response = $this->askChat($profile, $question, $pieces, $mode, false, $images);
     	   } else {
             if ($this->debug) echo "PROCESS MESSAGE : pieces:" . (is_array($pieces) ? implode(',', $pieces) : $pieces) . " mode:$mode \n";
-             $response = $this->askAssistant($profile, $question, $pieces, $mode, true, null);
+             $response = $this->askChat($profile, $question, $pieces, $mode, true, null);
            }
          	
             // Exécuter l'action si nécessaire
@@ -1389,8 +1389,8 @@ class JeedomAssistant {
     /**
      * Obtenir l'historique d'une conversation
      */
-    public function getHistory($profile, $limit = 20) {
-        return $this->ai->getThreadHistory($profile, $limit);
+    public function getHistory($profile) {
+        return $this->ai->getConversationHistory($profile);
     }
   
 /**
