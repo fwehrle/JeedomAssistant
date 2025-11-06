@@ -24,9 +24,8 @@
 - **Indépendance** : Moins de dépendance à un seul fournisseur
 
 #### Fichiers de configuration
-- Ancien fichier : `/tmp/jeedom_openai_config.json`
-- Nouveau fichier : `/tmp/jeedom_ai_config.json`
-- Les deux peuvent coexister temporairement
+- `/tmp/jeedom_ai_config.json`
+
 
 #### Gestion d'erreurs améliorée
 - **Messages d'erreur user-friendly** : Les erreurs API sont maintenant traduites en français avec des solutions
