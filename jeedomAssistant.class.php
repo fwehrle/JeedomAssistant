@@ -1,12 +1,12 @@
 <?php
 /**
- * JeedomAssistant - Classe d'intégration OpenAI pour Jeedom
- * 
- * Permet d'interroger un assistant IA avec le contexte domotique complet
+ * JeedomAssistant - Classe d'intégration multi-provider IA pour Jeedom
+ *
+ * Permet d'interroger un assistant IA (OpenAI, Mistral, Claude) avec le contexte domotique complet
  * et d'exécuter les actions recommandées
- * 
+ *
  * @author Franck WEHRLE
- * @version 2.05
+ * @version 3.00
  */
 /**
  * ┌─────────────────┬───────┬──────────────┬──────────────┬─────────────────────────┐
@@ -37,15 +37,16 @@
  *   - gpt-4o       : ~$5-10/mois
  *   - gpt-4-turbo  : ~$15-30/mois
  * */
-require_once '/var/www/html/plugins/script/data/jeedomAssistant/openAIChat.class.php';
+require_once '/var/www/html/plugins/script/data/jeedomAssistant/AIChat.class.php';
 
 class JeedomAssistant {
     
     // Configuration
     private $jeedomStatusFile = '/tmp/jeedom_status.json';
-    private $openaiApiKey;
-    private $openaiModel;
-    private $openaiVisionModel;
+    private $aiApiKey;
+    private $aiBaseUrl;
+    private $aiModel;
+    private $aiVisionModel;
   
     private $configFile;
     private $notificationScenarioId;
@@ -62,7 +63,7 @@ class JeedomAssistant {
     private $debugEqDetail;
     private $debugDontRunAction;
     
-    // Assistant OpenAI
+    // Assistant AI
     private $ai;
     
     // Données collectées
@@ -74,12 +75,12 @@ class JeedomAssistant {
     public function __construct($config = []) {
         // Configuration par défaut
         $defaults = [
-            'openai_api_key' => '',
-            'openai_model' => 'gpt-4o-mini',
-          	'openai_vision_model' => 'gpt-4o', // 'gpt-4o-mini' ou 'gpt-4o', 'gpt-4-turbo' ('gpt-4o', 'gpt-4-turbo' pour vision)
-    
-            'config_file' => '/tmp/jeedom_openai_config.json',
-            'notification_scenario_id' => 387,
+            'ai_api_key' => '',
+            'ai_model' => 'gpt-4o-mini',
+          	'ai_vision_model' => 'gpt-4o', // ('gpt-4o', 'gpt-4-turbo' pour vision)
+            'ai_base_url' => 'https://api.openai.com/v1/chat/completions',
+            'config_file' => '/tmp/jeedom_ai_config.json',
+            'notification_scenario_id' => 0,
             
             // Filtres
             'pieces_inclus' => [
@@ -111,40 +112,41 @@ class JeedomAssistant {
         $config = array_merge($defaults, $config);
         
         // Assignation des propriétés
-        $this->openaiApiKey = $config['openai_api_key'];
-        $this->openaiModel = $config['openai_model'];
-      	$this->openaiVisionModel = $config['openai_vision_model'];
+        $this->aiApiKey = $config['ai_api_key'];
+        $this->aiBaseUrl = $config['ai_base_url'];
+        $this->aiModel = $config['ai_model'];
+      	$this->aiVisionModel = $config['ai_vision_model'];
         $this->configFile = $config['config_file'];
         $this->notificationScenarioId = $config['notification_scenario_id'];
-        
+
         $this->piecesInclus = $config['pieces_inclus'];
         $this->equipementsExclus = $config['equipements_exclus'];
         $this->eqActionInclusCategories = $config['eq_action_inclus_categories'];
         $this->eqCmdExclus = $config['eq_cmd_exclus'];
-        
+
         $this->debug = $config['debug'];
         $this->debugEq = $config['debug_eq'];
         $this->debugEqDetail = $config['debug_eq_detail'];
         $this->debugDontRunAction = $config['debug_dont_run_action'];
-        
-        // Initialiser l'assistant OpenAI
-        if (empty($this->openaiApiKey)) {
-            throw new Exception("La clé API OpenAI est requise");
+
+        // Initialiser l'assistant IA
+        if (empty($this->aiApiKey)) {
+            throw new Exception("La clé API IA est requise");
         }
-        
-        $this->ai = new OpenAIChat($this->openaiApiKey, $this->debug, $this->configFile);
-        
+
+        $this->ai = new AIChat( $this->aiApiKey, $this->aiBaseUrl, $this->aiModel, $this->aiVisionModel, $this->debug, $this->configFile);
+
         if ($this->debug) {
-            echo "JeedomAssistant initialisé en mode DEBUG avec le modèle: {$this->openaiModel}\n";
+            echo "JeedomAssistant initialisé en mode DEBUG avec le modèle: {$this->aiModel}\n";
         }else{
-          //echo "JeedomAssistant initialisé avec le modèle: {$this->openaiModel}\n";
+          //echo "JeedomAssistant initialisé avec le modèle: {$this->aiModel}\n";
         }
     }
 
     /**
-     * Obtenir l'instance OpenAIChat pour accéder aux méthodes avancées
+     * Obtenir l'instance AIChat pour accéder aux méthodes avancées
      *
-     * @return OpenAIChat Instance de l'assistant OpenAI
+     * @return AIChat Instance de l'assistant IA
      */
     public function getAI() {
         return $this->ai;
@@ -552,7 +554,7 @@ class JeedomAssistant {
                 "- Mémorise les préférences exprimées par chaque utilisateur\n" .
                 "- Si une pièce a été mentionnée récemment, c'est probablement celle concernée par \"ici\" ou \"là\"\n",
             
-            'model' => $this->openaiModel
+            'model' => $this->aiModel
         ];
     }
     
@@ -627,10 +629,10 @@ class JeedomAssistant {
 
         if (!empty($images) && is_array($images)) {
             if ($this->debug) echo "Analyse d'image(s) : askWithImage\n";
-			$response = $this->ai->askWithImage($profile, $message, $assistantConfig, $images, $this->openaiVisionModel);
+			$response = $this->ai->askWithImage($profile, $message, $assistantConfig, $images, $this->aiVisionModel);
     	} else {
             if ($this->debug) echo "Analyse de texte : ask\n";
-            $response = $this->ai->ask($profile, $message, $assistantConfig, $this->openaiModel);
+            $response = $this->ai->ask($profile, $message, $assistantConfig, $this->aiModel);
         }
         
         if ($this->debug) echo "Réponse BRUTE : $response\n";
@@ -674,7 +676,7 @@ class JeedomAssistant {
         $systemPrompt = "Tu es un assistant intelligent qui répond uniquement en JSON valide. " .
                         "Suis exactement le format demandé sans ajouter de texte explicatif.";
 
-        $response = $this->ai->chatCompletion($systemPrompt, $question, $this->openaiModel);
+        $response = $this->ai->chatCompletion($systemPrompt, $question, $this->aiModel);
 
         if ($this->debug) echo "Réponse BRUTE chatCompletion : $response\n";
 
@@ -710,10 +712,7 @@ class JeedomAssistant {
                 return array_merge($defaults, $response);
             }
 
-            // Nettoyer la réponse (retirer les backticks markdown si présents)
-            $response = preg_replace('/^```json\s*|\s*```$/m', '', $response);
-            
-            // Décoder le JSON
+            // Décoder le JSON (plus besoin de nettoyer grâce à response_format: json_object)
             $responseData = json_decode($response, true);
             
             // Vérifier les erreurs JSON
@@ -1218,16 +1217,13 @@ class JeedomAssistant {
                 } elseif (!empty($piecesResponseRaw) && is_string($piecesResponseRaw)) {
                     if ($this->debug) echo "Réponse brute askIA: " . $piecesResponseRaw . "\n";
 
-                    // Nettoyer la réponse (retirer les backticks markdown si présents)
-                    $piecesResponseCleaned = preg_replace('/^```json\s*|\s*```$/m', '', trim($piecesResponseRaw));
-
-                    // ✅ Valider que c'est du JSON valide
-                    $piecesData = json_decode($piecesResponseCleaned, true);
+                    // ✅ Valider que c'est du JSON valide (plus besoin de nettoyer grâce à response_format: json_object)
+                    $piecesData = json_decode(trim($piecesResponseRaw), true);
 
                     if ($piecesData === null) {
                         if ($this->debug) {
                             echo "⚠️ Erreur JSON: " . json_last_error_msg() . "\n";
-                            echo "⚠️ Contenu reçu: " . substr($piecesResponseCleaned, 0, 200) . "\n";
+                            echo "⚠️ Contenu reçu: " . substr($piecesResponseRaw, 0, 200) . "\n";
                         }
                     }
 

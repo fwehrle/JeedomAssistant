@@ -1,33 +1,125 @@
 <?php
 
-/* Classe d'utilisation de l'API chat conversation d'OpenAI
-* @author Franck WEHRLE avec l'aide de Claude.ai qui m'a conseillé chatGPT parce qu'elle n'avait pas de gestion de thread ;)
-* @version 2.05
+/* Classe d'utilisation de l'API chat conversation (multi-provider : OpenAI, Mistral, Claude)
+* @author Franck WEHRLE avec l'aide de Claude.ai
+* @version 3.00
 */
 
 // ============================================
-// CLASSE OPENAI CHAT
+// CLASSE AI CHAT (Multi-provider)
 // ============================================
-class OpenAIChat {
+class AIChat {
     private $apiKey;
-    private $baseUrl = 'https://api.openai.com/v1';
-    private $configFile = '/tmp/jeedom_openai_config.json';
+    private $baseUrl = 'https://api.openai.com/v1';  // Par défaut OpenAI, modifiable
+    private $configFile = '/tmp/jeedom_ai_config.json';  // Renommé pour être agnostique
     private $model = 'gpt-4o-mini'; // 'gpt-4o-mini' ou 'gpt-4o', 'gpt-4-turbo' ('gpt-4o', 'gpt-4-turbo' pour vision)
     private $modelVision = 'gpt-4o'; //'gpt-4-turbo'
-    private $debug;
+    private $debug = true;
     private $conversationMaxAge = 3600; // Durée de vie max d'une conversation en secondes (1h par défaut)
 
-    public function __construct($apiKey, $debug = false, $configFile = null) {
+    public function __construct($apiKey, $baseUrl, $model, $modelVision, $debug = true, $configFile = null) {
       if ($this->debug) echo "__construct\n";
-        if (empty($apiKey)) {
+        if (!empty($apiKey)) {
+            $this->apiKey = $apiKey;
+        } else {
             throw new Exception("La clé API ne peut pas être vide");
+        }
+        if (!empty($baseUrl)) {
+            $this->baseUrl = $baseUrl;
+        }else {
+            throw new Exception("L'URL de base de l'API ne peut pas être vide");
+        }
+        if (!empty($model)) {
+            $this->model = $model;
+        }else {
+            throw new Exception("Le modèle IA ne peut pas être vide");
+        }
+        if (!empty($modelVision)) {
+            $this->modelVision = $modelVision;
         }
       	if (!empty($configFile)) {
             $this->configFile = $configFile;
         }
-      	//$this->configFile = $configFile;
-        $this->apiKey = $apiKey;
+
         $this->debug = $debug;
+    }
+
+    /**
+     * Formater un message d'erreur API de manière user-friendly
+     *
+     * @param int $httpCode Code HTTP de l'erreur
+     * @param string $response Réponse brute de l'API
+     * @return string Message d'erreur formaté
+     */
+    private function formatApiError($httpCode, $response) {
+        // Essayer de parser la réponse JSON
+        $errorData = json_decode($response, true);
+
+        // Messages par défaut selon le code HTTP
+        $defaultMessages = [
+            400 => "Requête invalide",
+            401 => "Clé API invalide ou expirée",
+            403 => "Accès refusé",
+            404 => "Endpoint API non trouvé",
+            429 => "Limite de requêtes dépassée",
+            500 => "Erreur serveur API",
+            503 => "Service API temporairement indisponible"
+        ];
+
+        $userMessage = $defaultMessages[$httpCode] ?? "Erreur API";
+
+        // Si on a un JSON valide avec des détails
+        if ($errorData !== null) {
+            // Gestion spécifique OpenAI/Mistral
+            if (isset($errorData['error'])) {
+                $error = $errorData['error'];
+
+                // Message de l'API
+                if (isset($error['message'])) {
+                    $apiMessage = $error['message'];
+
+                    // Traductions et simplifications des messages courants
+                    if (strpos($apiMessage, 'Service tier capacity exceeded') !== false) {
+                        $userMessage = "⚠️ Quota du modèle dépassé. Veuillez patienter quelques minutes ou utiliser un autre modèle.";
+                    } elseif (strpos($apiMessage, 'Rate limit') !== false || strpos($apiMessage, 'rate_limit') !== false) {
+                        $userMessage = "⚠️ Trop de requêtes. Veuillez patienter quelques secondes avant de réessayer.";
+                    } elseif (strpos($apiMessage, 'Invalid API key') !== false || strpos($apiMessage, 'Incorrect API key') !== false) {
+                        $userMessage = "❌ Clé API invalide. Vérifiez votre configuration.";
+                    } elseif (strpos($apiMessage, 'model') !== false && strpos($apiMessage, 'does not exist') !== false) {
+                        $userMessage = "❌ Le modèle spécifié n'existe pas ou n'est pas accessible.";
+                    } elseif (strpos($apiMessage, 'context_length_exceeded') !== false) {
+                        $userMessage = "⚠️ Message trop long. Le contexte dépasse la limite du modèle.";
+                    } else {
+                        // Utiliser le message de l'API s'il est compréhensible
+                        $userMessage = "❌ " . $apiMessage;
+                    }
+                }
+
+                // Type d'erreur
+                if (isset($error['type'])) {
+                    $errorType = $error['type'];
+                    // Ajouter le type si informatif
+                    if ($errorType === 'insufficient_quota') {
+                        $userMessage .= " (Quota insuffisant)";
+                    }
+                }
+
+                // Code d'erreur spécifique
+                if (isset($error['code'])) {
+                    $errorCode = $error['code'];
+                    if ($this->debug) {
+                        $userMessage .= " [Code: $errorCode]";
+                    }
+                }
+            }
+
+            // Gestion spécifique Claude (format différent)
+            if (isset($errorData['type']) && isset($errorData['message'])) {
+                $userMessage = "❌ " . $errorData['message'];
+            }
+        }
+
+        return $userMessage;
     }
 
     /**
@@ -53,7 +145,7 @@ class OpenAIChat {
         return $this->conversationMaxAge;
     }
 
-      /**
+    /**
      * Obtenir l'historique de conversation d'un profil depuis le JSON local
      *
      * @param string $profile Profil utilisateur
@@ -199,8 +291,8 @@ class OpenAIChat {
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
             'Content-Type: application/json',
-            'Authorization: Bearer ' . $this->apiKey,
-            'OpenAI-Beta: assistants=v2'
+             'Authorization: Bearer ' . $this->apiKey
+            // ,'OpenAI-Beta: assistants=v2'
         ]);
 
         if ($method === 'POST') {
@@ -236,7 +328,11 @@ class OpenAIChat {
         }
 
         if ($httpCode >= 400) {
-            throw new Exception("Erreur API ($httpCode): " . substr($response, 0, 300));
+            $errorMessage = $this->formatApiError($httpCode, $response);
+            if ($this->debug) {
+                echo "Détails erreur API ($httpCode): " . substr($response, 0, 300) . "\n";
+            }
+            throw new Exception($errorMessage);
         }
 
         $decoded = json_decode($response, true);
@@ -254,7 +350,7 @@ class OpenAIChat {
         if (file_exists($this->configFile)) {
             $content = file_get_contents($this->configFile);
             $config = json_decode($content, true);
-            return $config ?: ['assistant_id' => null, 'threads' => []];
+            return $config ?: ['assistant_id' => null, 'threads' => []]; //Assistant et threads OBSOLETE?
         }
         return ['assistant_id' => null, 'threads' => []];
     }
@@ -282,21 +378,7 @@ class OpenAIChat {
         
         return true;
     }
-    
-    /**
-     * Créer un assistant
-     */
-    public function createAssistant($name, $instructions, $model = null) {
-      if ($model === null) {
-        $model = $this->model;
-      }  
-      return $this->apiCall('POST', '/assistants', [
-            'name' => $name,
-            'instructions' => $instructions,
-            'model' => $model
-        ]);
-    }
-               
+                   
     /**
      * Poser une question (méthode principale)
      * Utilise Chat Completion avec historique local JSON
@@ -364,7 +446,8 @@ class OpenAIChat {
                 'model' => $model,
                 'messages' => $messages,
                 'temperature' => 0.7,
-                'max_tokens' => 2000
+                'max_tokens' => 2000,
+                'response_format' => ['type' => 'json_object']  // Force JSON valide
             ];
 
             if ($this->debug) {
@@ -393,7 +476,11 @@ class OpenAIChat {
             }
 
             if ($httpCode >= 400) {
-                throw new Exception("Erreur API ($httpCode): " . substr($response, 0, 300));
+                $errorMessage = $this->formatApiError($httpCode, $response);
+                if ($this->debug) {
+                    echo "Détails erreur API ($httpCode): " . substr($response, 0, 300) . "\n";
+                }
+                throw new Exception($errorMessage);
             }
 
             $responseData = json_decode($response, true);
@@ -454,7 +541,7 @@ class OpenAIChat {
     }
 
     /**
-     * Uploader un fichier image vers OpenAI
+     * Uploader un fichier image vers l'IA
      * @param string $imageData Données binaires de l'image
      * @param string $filename Nom du fichier (ex: "image.jpg")
      * @return array Réponse de l'API avec l'ID du fichier
@@ -481,7 +568,7 @@ class OpenAIChat {
         }
 
         // Créer un fichier temporaire avec la bonne extension
-        $tempFile = tempnam(sys_get_temp_dir(), 'openai_') . '.' . $extension;
+        $tempFile = tempnam(sys_get_temp_dir(), 'ai_') . '.' . $extension;
         file_put_contents($tempFile, $imageData);
 
         if ($this->debug) echo "Upload fichier: $filename (MIME: $mimeType, Size: " . strlen($imageData) . " octets)\n";
@@ -651,7 +738,8 @@ class OpenAIChat {
                 'model' => $model,
                 'messages' => $messages,
                 'temperature' => 0.7,
-                'max_tokens' => 2000
+                'max_tokens' => 2000,
+                'response_format' => ['type' => 'json_object']  // Force JSON valide
             ];
 
             if ($this->debug) {
@@ -680,7 +768,11 @@ class OpenAIChat {
             }
 
             if ($httpCode >= 400) {
-                throw new Exception("Erreur API ($httpCode): " . substr($response, 0, 300));
+                $errorMessage = $this->formatApiError($httpCode, $response);
+                if ($this->debug) {
+                    echo "Détails erreur API ($httpCode): " . substr($response, 0, 300) . "\n";
+                }
+                throw new Exception($errorMessage);
             }
 
             $responseData = json_decode($response, true);
@@ -758,7 +850,8 @@ class OpenAIChat {
                     ]
                 ],
                 'temperature' => 0.7,
-                'max_tokens' => 500 // Limite pour réponses courtes (extraction de pièces)
+                'max_tokens' => 500, // Limite pour réponses courtes (extraction de pièces)
+                'response_format' => ['type' => 'json_object']  // Force JSON valide
             ];
 
             if ($this->debug) {
@@ -788,7 +881,11 @@ class OpenAIChat {
             }
 
             if ($httpCode >= 400) {
-                throw new Exception("Erreur API ($httpCode): " . substr($response, 0, 300));
+                $errorMessage = $this->formatApiError($httpCode, $response);
+                if ($this->debug) {
+                    echo "Détails erreur API ($httpCode): " . substr($response, 0, 300) . "\n";
+                }
+                throw new Exception($errorMessage);
             }
 
             $responseData = json_decode($response, true);
@@ -828,11 +925,11 @@ class OpenAIChat {
 
 /*
 //Utilisation : 
-	require_once '/var/www/html/plugins/script/data/openAIChat.class.php';
+	require_once '/var/www/html/plugins/script/data/AIChat.class.php';
 
 
     // Initialiser l'assistant
-    $ai = new openAIChat(OPENAI_API_KEY, CONFIG_FILE);
+    $ai = new AIChat(API_KEY, CONFIG_FILE);
        
     // Exemple 2 : Depuis une variable de scénario
     // $profile = $scenario->getData('profile');

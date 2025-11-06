@@ -1,11 +1,11 @@
 <?php
 /**
- * Scénario d'interrogation d'une IA (OpenAIChat)
+ * Scénario d'interrogation IA multi-provider (OpenAI, Mistral, Claude)
  * Version simplifiée utilisant la classe JeedomAssistant
- * 
+ *
  * @author Franck WEHRLE
- * @version 2.05
- * 
+ * @version 3.00
+ *
  * Tags nécessaires:
  * - #profile# : Nom de l'utilisateur (obligatoire)
  * - #msg# : Question/commande (obligatoire)
@@ -17,17 +17,37 @@
 // ============================================
 // CONFIGURATION
 // ============================================
+$notificationScenarioId = 387; // TODO ID de votre scénario de notification
 
 require_once '/var/www/html/plugins/script/data/jeedomAssistant/jeedomAssistant.class.php';
 
+// Exemples de configuration multi-provider :
+//
+// OpenAI :
+// $aiApiKey = $scenario->getData('OPENAI_API_KEY'); //Token API
+// $aiBaseUrl = "https://api.openai.com/v1"; //URL de base de l'API OpenAI
+// $aiModel = "gpt-4o-mini";
+// $aiModelVision = "gpt-4o-mini"; // 'gpt-4o-mini' ou 'gpt-4o', 'gpt-4-turbo' (OpenAI avec vision)
+
+// Mistral :
+$aiApiKey = $scenario->getData('MISTRAL_API_KEY'); //Token API
+$aiBaseUrl = "https://api.mistral.ai/v1"; //URL de base de l'API Mistral
+$aiModel = "mistral-small-2506"; // mistral-small-2506 : léger et rapide /magistral-small-2509 : équilibré et puissant
+$aiModelVision = "mistral-small-2506"; // Vision : mistral-small-2506 (avec vision) / pixtral-12b-2409 (vision uniquement)
+
+// Claude :
+// $aiApiKey = $scenario->getData('CLAUDE_API_KEY'); //Token API
+// $aiBaseUrl = "https://api.anthropic.com/v1"; //URL de base de l'API Claude
+// $aiModel = "claude-3-5-sonnet-20241022"; // claude-3-5-sonnet-20241022 / claude-4-100k-20241022
+// $aiModelVision = ""; // Pas de modèle avec vision pour Claude
+
 // Configuration de l'assistant
 $config = [
-    // OpenAI
-    'openai_api_key' => $scenario->getData('OPENAI_API_KEY'), // ou directement 'sk-proj-...'
-    'openai_model' => 'gpt-4o-mini', // 'gpt-4o-mini' ou 'gpt-4o', 'gpt-4-turbo' ('gpt-4o', 'gpt-4-turbo' pour vision)
-    'openai_vision_model' => 'gpt-4o-mini', //'gpt-4.1-mini', 'gpt-4o-mini' ou 'gpt-4o', 'gpt-4-turbo' ('gpt-4o', 'gpt-4-turbo' pour vision)
-    // Notification
-    'notification_scenario_id' => 387, // TODO: ID de votre scénario de notification
+    'ai_api_key' => $aiApiKey,
+    'ai_model' => $aiModel,
+    'ai_vision_model' => $aiModelVision,
+    'ai_base_url' => $aiBaseUrl,
+    'notification_scenario_id' => $notificationScenarioId,
     
     // Pièces à inclure
     'pieces_inclus' => [
