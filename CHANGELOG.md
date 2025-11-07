@@ -1,5 +1,139 @@
 # Changelog - JeedomAssistant
 
+## Version 3.01 (2025-11-07)
+
+### 🎯 Optimisation de l'historique des conversations
+
+#### Amélioration majeure
+**Stockage optimisé de l'historique** : Seule la question de l'utilisateur est maintenant sauvegardée, sans le JSON volumineux des capteurs.
+
+#### Problème résolu
+Avant cette version, chaque message utilisateur stocké dans l'historique (`/tmp/jeedom_ai_config.json`) contenait :
+- La question de l'utilisateur (~20-100 octets)
+- **+ Le JSON complet des capteurs Jeedom (~5-30 KB)**
+
+Cela causait :
+- **Historique très volumineux** (plusieurs MB après quelques jours)
+- **Confusion dans le contexte** (données redondantes)
+- **Gaspillage de stockage** (mêmes données répétées 20 fois)
+
+#### Solution implémentée
+Ajout d'un paramètre optionnel `$messageForHistory` aux méthodes de l'API :
+- `AIChat::ask()` - Nouveau paramètre pour la version allégée
+- `AIChat::askWithImage()` - Nouveau paramètre pour la version allégée
+- `jeedomAssistant::askChat()` - Extraction de la question avant ajout du JSON
+
+#### Résultat
+**Avant** (stocké dans l'historique) :
+```json
+{
+  "role": "user",
+  "content": "C'est Franck. quelle est la température?\nVoici les valeurs actuelles des capteurs : {...30KB de JSON...}",
+  "timestamp": 1762511773
+}
+```
+
+**Après** (stocké dans l'historique) :
+```json
+{
+  "role": "user",
+  "content": "C'est Franck. quelle est la température?",
+  "timestamp": 1762511773
+}
+```
+
+#### Avantages
+- **Réduction de 95% de la taille** de l'historique
+- **Contexte plus clair** pour l'IA (pas de confusion)
+- **Performances améliorées** (moins de données à parser)
+- **Économies de stockage** significatives
+
+#### Compatibilité
+- ✅ **Rétrocompatible** : Si `$messageForHistory` n'est pas fourni, le comportement reste identique
+- ✅ **Transparent** : Aucun changement nécessaire pour les utilisateurs existants
+- ✅ **Automatique** : Appliqué par défaut dans `askChat()`
+
+#### Note technique
+Le JSON des capteurs continue d'être envoyé à l'API IA pour le contexte en temps réel, mais n'est plus conservé dans l'historique persistant.
+
+---
+
+### 📝 Instructions IA paramétrables
+
+#### Nouvelle fonctionnalité
+**Configuration du prompt système** : Les instructions de l'assistant IA peuvent maintenant être personnalisées dans le scénario.
+
+#### Changements
+- **Extraction du prompt** : Les instructions sont maintenant dans `$config['ai_instructions']` au lieu d'être en dur dans `createAssistantConfig()`
+- **Configuration par défaut** : Prompt complet intégré dans le constructeur de `jeedomAssistant`
+- **Override optionnel** : Possibilité de personnaliser le prompt dans `codeScenario_Notification IA.php`
+
+#### Utilisation
+Dans votre fichier de scénario, vous pouvez maintenant personnaliser le comportement de l'assistant :
+
+```php
+$config = [
+    'ai_api_key' => $aiApiKey,
+    'ai_model' => $aiModel,
+    'ai_vision_model' => $aiModelVision,
+    'ai_base_url' => $aiBaseUrl,
+
+    // Instructions personnalisées (optionnel)
+    'ai_instructions' => "Tu es Jarvis, un assistant domotique...\n[Votre prompt personnalisé]"
+];
+```
+
+#### Avantages
+- **Personnalisation facile** : Modifier le comportement sans toucher aux classes
+- **Multi-langues** : Créer des assistants en différentes langues
+- **Tests A/B** : Comparer différents prompts facilement
+- **Maintenance** : Séparation claire entre code et configuration
+
+#### Fichiers modifiés
+- `jeedomAssistant.class.php` : Ajout propriété `$aiInstructions` et dans `$defaults`
+- `codeScenario_Notification IA.php` : Commentaire explicatif pour override optionnel
+
+---
+
+### 🔧 Correction du prompt pour les états d'équipements
+
+#### Problème identifié
+**Confusion sur les états de la porte de garage** : L'IA répondait parfois "La porte du garage est déjà ouverte" alors qu'on demandait de l'ouvrir.
+
+#### Cause
+Règles contradictoires dans le prompt système :
+- **Portes/Garage** : `Etat = 0 → Ouvert` / `Etat = 1 → Fermé`
+- **Fenêtres** : `Etat = 0 → Fermé` / `Etat = 1 → Ouvert` ❌ **INVERSÉ !**
+
+Cette incohérence causait une confusion dans l'interprétation des états.
+
+#### Solution
+**Règle unifiée pour tous les équipements** :
+
+```
+RÈGLE GÉNÉRALE : Pour tous les équipements (portes, volets, fenêtres, garage, vannes) :
+  * Etat = 0 → équipement OUVERT
+  * Etat = 1 → équipement FERMÉ
+```
+
+#### Résultat
+- ✅ **Cohérence totale** : Tous les équipements suivent la même logique
+- ✅ **Plus de confusion** : L'IA interprète correctement les états
+- ✅ **Meilleure fiabilité** : Actions exécutées uniquement si nécessaire
+
+#### Mapping des actions clarifié
+```
+'Ouvrir' ou 'Monter' → ouvre l'équipement (porte, volet, vanne, garage)
+'Fermer' ou 'Descendre' → ferme l'équipement
+'On' ou 'Allumer' → allume l'équipement
+'Off' ou 'Eteindre' → éteint l'équipement
+```
+
+#### Note
+Les lumières et équipements électriques conservent leur propre logique : `Etat = 0 → éteint` / `Etat = 1 → allumé`
+
+---
+
 ## Version 3.00 (2025-11-06)
 
 ### 🌍 Multi-Provider Support

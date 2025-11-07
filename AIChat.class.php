@@ -2,7 +2,7 @@
 
 /* Classe d'utilisation de l'API chat conversation (multi-provider : OpenAI, Mistral, Claude)
 * @author Franck WEHRLE avec l'aide de Claude.ai
-* @version 3.00
+* @version 3.01
 */
 
 // ============================================
@@ -383,7 +383,7 @@ class AIChat {
      * Poser une question (méthode principale)
      * Utilise Chat Completion avec historique local JSON
      */
-    public function ask($profile, $message, $assistantConfig = null, $modelOverride = null) {
+    public function ask($profile, $message, $assistantConfig = null, $modelOverride = null, $messageForHistory = null) {
         $startTime = microtime(true);
 
         // Configuration par défaut de l'assistant
@@ -496,7 +496,9 @@ class AIChat {
             $assistantResponse = $responseData['choices'][0]['message']['content'];
 
             // Sauvegarder les deux messages dans l'historique
-            $this->addMessageToHistory($profile, 'user', $message);
+            // Si $messageForHistory est fourni, l'utiliser à la place du message complet (pour éviter de stocker le JSON des capteurs)
+            $messageToStore = ($messageForHistory !== null) ? $messageForHistory : $message;
+            $this->addMessageToHistory($profile, 'user', $messageToStore);
             $this->addMessageToHistory($profile, 'assistant', $assistantResponse);
 
             $endTime = microtime(true);
@@ -630,7 +632,7 @@ class AIChat {
      * @param string|null $modelOverride Modèle à utiliser
      * @return string Réponse de l'assistant
      */
-    public function askWithImage($profile, $message, $assistantConfig = null, $images = null, $modelOverride = null) {
+    public function askWithImage($profile, $message, $assistantConfig = null, $images = null, $modelOverride = null, $messageForHistory = null) {
         $startTime = microtime(true);
 
         // Configuration par défaut de l'assistant avec support vision
@@ -789,7 +791,9 @@ class AIChat {
 
             // Sauvegarder les deux messages dans l'historique
             // Note: Pour l'historique, on stocke juste le texte, pas les images (pour économiser l'espace)
-            $this->addMessageToHistory($profile, 'user', $message . " [avec image(s)]");
+            // Si $messageForHistory est fourni, l'utiliser à la place du message complet (pour éviter de stocker le JSON des capteurs)
+            $messageToStore = ($messageForHistory !== null) ? $messageForHistory : $message;
+            $this->addMessageToHistory($profile, 'user', $messageToStore . " [avec image(s)]");
             $this->addMessageToHistory($profile, 'assistant', $assistantResponse);
 
             $endTime = microtime(true);

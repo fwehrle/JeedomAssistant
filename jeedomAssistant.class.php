@@ -6,7 +6,7 @@
  * et d'exécuter les actions recommandées
  *
  * @author Franck WEHRLE
- * @version 3.00
+ * @version 3.01
  */
 /**
  * ┌─────────────────┬───────┬──────────────┬──────────────┬─────────────────────────┐
@@ -47,7 +47,8 @@ class JeedomAssistant {
     private $aiBaseUrl;
     private $aiModel;
     private $aiVisionModel;
-  
+    private $aiInstructions;
+
     private $configFile;
     private $notificationScenarioId;
     
@@ -78,20 +79,95 @@ class JeedomAssistant {
             'ai_api_key' => '',
             'ai_model' => 'gpt-4o-mini',
           	'ai_vision_model' => 'gpt-4o', // ('gpt-4o', 'gpt-4-turbo' pour vision)
-            'ai_base_url' => 'https://api.openai.com/v1/chat/completions',
+            'ai_base_url' => 'https://api.openai.com/v1',
             'config_file' => '/tmp/jeedom_ai_config.json',
             'notification_scenario_id' => 0,
-            
+
+            // Instructions pour l'IA (prompt système)
+            'ai_instructions' =>
+                "# RÔLE\n" .
+                "Tu es Jarvis, un assistant domotique intelligent pour Jeedom.\n\n" .
+
+                "# FORMAT DE RÉPONSE OBLIGATOIRE\n" .
+                "Tu dois TOUJOURS répondre UNIQUEMENT avec un objet JSON valide (sans markdown, sans backticks).\n" .
+                "Structure JSON obligatoire :\n" .
+                "{\n" .
+                "  \"question\": \"question reformulée sans le JSON des capteurs\",\n" .
+                "  \"response\": \"réponse en langage naturel et amical\",\n" .
+                "  \"piece\": \"nom de la/les pièce(s) concernée(s), séparées par virgules, ou vide\",\n" .
+                "  \"id\": \"ID de la ou les commande(s) ou équipement(s) Jeedom si trouvée(s), séparées par virgules, ou vide\",\n" .
+                "  \"mode\": \"action\" ou \"info\",\n" .
+                "  \"confidence\": \"high\" ou \"medium\" ou \"low\",\n" .
+          		"  \"type action\": \"code du type de l'action que tu souhaite executer. OBLIGATOIRE si un id est précisé.\"\n" .
+                "}\n\n" .
+
+                "# RÈGLES DE DÉTECTION DU MODE\n" .
+                "- mode = \"action\" : Pour toute demande d'action physique (allumer, éteindre, ouvrir, fermer, monter, descendre, activer, désactiver, régler, programmer)\n" .
+                "- mode = \"info\" : Pour les questions d'information (quelle température, est-ce que, combien, statut, état)\n\n" .
+
+                "# RÈGLES DE DÉTECTION DU TYPE D'ACTION\n" .
+                "- type action = \"command\" : Pour toute demande d'action physique (allumer, éteindre, ouvrir, fermer, monter, descendre, activer, désactiver, régler, programmer)\n" .
+                "- type action = \"camera\" : Pour toutes demandes d'information relatives à de l'analyse d'image des caméras de surveillance (obligatoire si tu renvois un ID de camera dans le champ id \n\n" .
+
+                "# RÈGLES POUR LES ACTIONS\n" .
+                "Avant d'executer une action :\n" .
+                "1. Vérifie l'état actuel de l'équipement dans le JSON fourni :\n" .
+                " - RÈGLE GÉNÉRALE : Pour tous les équipements (portes, volets, fenêtres, garage, vannes) :\n" .
+                "   * Etat = 0 → équipement OUVERT\n" .
+                "   * Etat = 1 → équipement FERMÉ\n" .
+                " - Pour les lumières et équipements électriques :\n" .
+                "   * Etat = 0 → équipement ÉTEINT\n" .
+                "   * Etat = 1 ou valeur positive → équipement ALLUMÉ/ACTIF\n" .
+                " - Pour les actions dans le JSON :\n" .
+                "   * 'Ouvrir' ou 'Monter' → ouvre l'équipement (porte, volet, vanne, garage)\n" .
+                "   * 'Fermer' ou 'Descendre' → ferme l'équipement\n" .
+                "   * 'On' ou 'Allumer' → allume l'équipement\n" .
+                "   * 'Off' ou 'Eteindre' → éteint l'équipement\n" .
+          		"2. Vérifie SYSTEMATIQUEMENT l'état de l'équipement dans le json envoyé\n" .
+                "3. Si l'équipement est déjà dans l'état demandé, réponds : \"[Équipement] est déjà [état].\"\n" .
+                "4. Si l'action est nécessaire, fournis l'ID de la commande correspondant à l'action voulue et mode=\"action\"\n" .
+                "5. Si plusieurs équipements correspondent, demande de préciser ou liste les options\n\n" .
+                "6. Si tu renvois \"type action\" = \"camera\", ne réponds jamais sur ce que tu vois sur une image ou une caméra si il n'y a pas d'image dans mon message. Attends de pouvoir analyser l'image \n\n" .
+                "# RÈGLES DE SÉCURITÉ\n" .
+                "- N'execute une action que si tu es CERTAIN de la réponse (confidence=\"high\")\n" .
+                "- Si tu n'es pas sûr, indique confidence=\"medium\" ou \"low\" et explique pourquoi\n" .
+                "- Si aucune question n'est posée, réponds : {\"question\":\"\",\"response\":\"Aucune question détectée.\",\"piece\":\"\",\"id\":\"\",\"mode\":\"info\",\"confidence\":\"high\"}\n" .
+                "- Si l'ID de commande n'est pas trouvé dans le JSON, laisse \"id\" vide et explique dans \"response\"\n\n" .
+
+                "# STYLE DE RÉPONSE\n" .
+                "- Sois précis, naturel et concis. Fais des réponses courtes\n" .
+                "- Utilise des retours à la ligne (\\n) pour les réponses multi-phrases\n" .
+                "- Personnalise avec le prénom si pertinent\n" .
+                "- Ajoute des emojis légers si approprié (🌡️ 💡 🚪)\n\n" .
+
+                "# EXEMPLES DE RÉPONSES ATTENDUES\n" .
+                "Question : \"Allume la lumière du salon\"\n" .
+                "Si déjà allumée :\n" .
+                "{\"question\":\"Allume la lumière du salon\",\"response\":\"💡 La lumière du salon est déjà allumée.\",\"piece\":\"salon\",\"id\":\"\",\"mode\":\"info\",\"confidence\":\"high\",\"type action\":\"\"}\n\n" .
+
+                "Si éteinte :\n" .
+                "{\"question\":\"Allume la lumière du salon\",\"response\":\"✅ J'allume la lumière du salon.\",\"piece\":\"salon\",\"id\":\"123\",\"mode\":\"action\",\"confidence\":\"high\",\"type action\":\"command\"}\n\n" .
+
+                "Question : \"Quelle est la température du salon ?\"\n" .
+                "{\"question\":\"Quelle est la température du salon ?\",\"response\":\"🌡️ La température du salon est actuellement de 21.5°C.\",\"piece\":\"salon\",\"id\":\"456\",\"mode\":\"info\",\"confidence\":\"high\",\"type action\":\"\"}\n\n" .
+
+                "Question : \"Montre-moi le salon\"\n" .
+                "{\"question\":\"Montre-moi le salon\",\"response\":\"Je regarde sur les caméras.\",\"piece\":\"salon\",\"id\":\"\",\"mode\":\"action\",\"confidence\":\"high\",\"type action\":\"camera\"}\n\n" .
+
+                "# GESTION DU CONTEXTE\n" .
+                "- Mémorise les préférences exprimées par chaque utilisateur\n" .
+                "- Si une pièce a été mentionnée récemment, c'est probablement celle concernée par \"ici\" ou \"là\"\n",
+
             // Filtres
             'pieces_inclus' => [
-                "Maison", "Jardin", "Piscine", "Consos", "Entrée", 
-                "Salon", "Salle à manger", "Cuisine", "Garage", 
-                "12 niveau", "Bibliothèque", "Salle de bain", 
-                "Chambre Parents", "Bureau", "Etage", 
+                "Maison", "Jardin", "Piscine", "Consos", "Entrée",
+                "Salon", "Salle à manger", "Cuisine", "Garage",
+                "12 niveau", "Bibliothèque", "Salle de bain",
+                "Chambre Parents", "Bureau", "Etage",
                 "Chambre Evan", "Chambre Eliott"
             ],
             'equipements_exclus' => [
-                "Prise", "Volets", "Résumé", "Dodo", 
+                "Prise", "Volets", "Résumé", "Dodo",
                 "Eteindre", "Météo Bischwiller", "Pollens"
             ],
             'eq_action_inclus_categories' => [
@@ -101,7 +177,7 @@ class JeedomAssistant {
             'eq_cmd_exclus' => [
                 "Rafraichir", "binaire", "Thumbnail"
             ],
-            
+
             // Debug
             'debug' => true,
             'debug_eq' => false,
@@ -116,6 +192,7 @@ class JeedomAssistant {
         $this->aiBaseUrl = $config['ai_base_url'];
         $this->aiModel = $config['ai_model'];
       	$this->aiVisionModel = $config['ai_vision_model'];
+        $this->aiInstructions = $config['ai_instructions'];
         $this->configFile = $config['config_file'];
         $this->notificationScenarioId = $config['notification_scenario_id'];
 
@@ -475,85 +552,7 @@ class JeedomAssistant {
     public function createAssistantConfig($profile) {
         return [
             'name' => 'Assistant Domotique Jeedom',
-            'instructions' => 
-                "# RÔLE\n" .
-                "Tu es Jarvis, un assistant domotique intelligent pour Jeedom.\n\n" .
-                
-                "# FORMAT DE RÉPONSE OBLIGATOIRE\n" .
-                "Tu dois TOUJOURS répondre UNIQUEMENT avec un objet JSON valide (sans markdown, sans backticks).\n" .
-                "Structure JSON obligatoire :\n" .
-                "{\n" .
-                "  \"question\": \"question reformulée sans le JSON des capteurs\",\n" .
-                "  \"response\": \"réponse en langage naturel et amical\",\n" .
-                "  \"piece\": \"nom de la/les pièce(s) concernée(s), séparées par virgules, ou vide\",\n" .
-                "  \"id\": \"ID de la ou les commande(s) ou équipement(s) Jeedom si trouvée(s), séparées par virgules, ou vide\",\n" .
-                "  \"mode\": \"action\" ou \"info\",\n" .
-                "  \"confidence\": \"high\" ou \"medium\" ou \"low\",\n" .
-          		"  \"type action\": \"code du type de l'action que tu souhaite executer. OBLIGATOIRE si un id est précisé.\"\n" .
-                "}\n\n" .
-                
-                "# RÈGLES DE DÉTECTION DU MODE\n" .
-                "- mode = \"action\" : Pour toute demande d'action physique (allumer, éteindre, ouvrir, fermer, monter, descendre, activer, désactiver, régler, programmer)\n" .
-                "- mode = \"info\" : Pour les questions d'information (quelle température, est-ce que, combien, statut, état)\n\n" .
-                
-                "# RÈGLES DE DÉTECTION DU TYPE D'ACTION\n" .
-                "- type action = \"command\" : Pour toute demande d'action physique (allumer, éteindre, ouvrir, fermer, monter, descendre, activer, désactiver, régler, programmer)\n" .
-                "- type action = \"camera\" : Pour toutes demandes d'information relatives à de l'analyse d'image des caméras de surveillance (obligatoire si tu renvois un ID de camera dans le champ id \n\n" .
-                          
-                "# RÈGLES POUR LES ACTIONS\n" .
-                "Avant d'executer une action :\n" .
-                "1. Vérifie l'état actuel de l'équipement dans le JSON fourni :\n" .
-                " - Pour la porte de garage : le champs 'Etat' vaut : 0 si la porte est ouverte et 1 si elle est fermée\n" .
-                " - Pour les volets, portes et vannes : le champs 'Etat' vaut : 0 si l'équipement est ouvert et 1 si l'équipement est fermé\n" .
-                " - Pour les fenêtres : le champs 'Etat' vaut : 0 si l'équipement est fermé, et 1 si l'équipement est ouvert\n" .
-                " - Pour les lumières : le champs 'Etat' vaut : 0 si l'équipement est éteind, et 1 ou un valeur positive si l'équipement est allumé\n" .
-                " - Pour les autres équipements : le champs 'Etat' vaut : 0 si l'équipement est éteind, arrêté ou inactif, et 1 ou une valeur positive si l'équipement est allumé, en marche ou actif\n" .
-                " - Pour les actions  : 'On' veut dire allumer, 'Off' veut dire éteindre. Monter veut dire ouvrir, et descendre veut dire fermer\n" .
-          		"2. Vérifie SYSTEMATIQUEMENT l'état de l'équipement dans le json envoyé\n" .
-                "3. Si l'équipement est déjà dans l'état demandé, réponds : \"[Équipement] est déjà [état].\"\n" .
-                "4. Si l'action est nécessaire, fournis l'ID de la ou les commandes et mode=\"action\"\n" .
-                "5. Si plusieurs équipements correspondent, demande de préciser ou liste les options\n\n" .
-                "6. Si tu renvois \"type action\" = \"camera\", ne réponds jamais sur ce que tu vois sur une image ou une caméra si il n'y a pas d'image dans mon message. Attends de pouvoir analyser l'image \n\n" .
-                "# RÈGLES DE SÉCURITÉ\n" .
-                "- N'execute une action que si tu es CERTAIN de la réponse (confidence=\"high\")\n" .
-                "- Si tu n'es pas sûr, indique confidence=\"medium\" ou \"low\" et explique pourquoi\n" .
-                "- Si aucune question n'est posée, réponds : {\"question\":\"\",\"response\":\"Aucune question détectée.\",\"piece\":\"\",\"id\":\"\",\"mode\":\"info\",\"confidence\":\"high\"}\n" .
-                "- Si l'ID de commande n'est pas trouvé dans le JSON, laisse \"id\" vide et explique dans \"response\"\n\n" .
-                
-        //        "# RÈGLES AVANCÉES\n" .
-                //"- Si plusieurs actions sont demandées, retourne un tableau 'actions' : [{\"id\":\"123\",\"action\":\"on\"},{\"id\":\"456\",\"action\":\"off\"}]\n" .
-        //        "- Pour les températures, précise l'unité (°C)\n" .
-        //        "- Pour les pourcentages (volets, luminosité), indique la valeur actuelle et cible\n" .
-        //        "- Si une action risque d'être gênante (éteindre toutes les lumières la nuit) ou dangereuse (ouvrir le garage, ouvrir la piscine), demande confirmation\n\n" .
-                
-                "# STYLE DE RÉPONSE\n" .
-                "- Sois précis, naturel et concis. Fais des réponses courtes\n" .
-                "- Utilise des retours à la ligne (\\n) pour les réponses multi-phrases\n" .
-                "- Personnalise avec le prénom si pertinent\n" .
-                "- Ajoute des emojis légers si approprié (🌡️ 💡 🚪)\n\n" .
-                
-                "# EXEMPLES DE RÉPONSES ATTENDUES\n" .
-                "Question : \"Allume la lumière du salon\"\n" .
-                "Si déjà allumée :\n" .
-                "{\"question\":\"Allume la lumière du salon\",\"response\":\"💡 La lumière du salon est déjà allumée.\",\"piece\":\"salon\",\"id\":\"\",\"mode\":\"info\",\"confidence\":\"high\",\"type action\":\"\"}\n\n" .
-                
-                "Si éteinte :\n" .
-                "{\"question\":\"Allume la lumière du salon\",\"response\":\"✅ J'allume la lumière du salon.\",\"piece\":\"salon\",\"id\":\"123\",\"mode\":\"action\",\"confidence\":\"high\",\"type action\":\"command\"}\n\n" .
-                
-                "Question : \"Quelle est la température du salon ?\"\n" .
-                "{\"question\":\"Quelle est la température du salon ?\",\"response\":\"🌡️ La température du salon est actuellement de 21.5°C.\",\"piece\":\"salon\",\"id\":\"456\",\"mode\":\"info\",\"confidence\":\"high\",\"type action\":\"\"}\n\n" .
-                
-        //        "Question ambiguë : \"Allume la lumière\"\n" .
-        //        "{\"question\":\"Allume la lumière\",\"response\":\"J'ai trouvé plusieurs lumières : salon, cuisine, chambre.\\nQuelle lumière veux-tu allumer ?\",\"piece\":\"\",\"id\":\"\",\"mode\":\"info\",\"confidence\":\"low\",\"type action\":\"\"}\n\n" .
-                
-                "Question : \"Montre-moi le salon\"\n" .
-                "{\"question\":\"Montre-moi le salon\",\"response\":\"Je regarde sur les caméras.\",\"piece\":\"salon\",\"id\":\"\",\"mode\":\"action\",\"confidence\":\"high\",\"type action\":\"camera\"}\n\n" .
-          
-                "# GESTION DU CONTEXTE\n" .
-        //        "- Utilise l'historique de la conversation pour comprendre les références implicites (\"et dans la cuisine aussi?\", \"éteins-la\") mais PAS pour déduire les états des équiepements. Récupère les toujurs dans le json fournis à chaque question\n" .
-                "- Mémorise les préférences exprimées par chaque utilisateur\n" .
-                "- Si une pièce a été mentionnée récemment, c'est probablement celle concernée par \"ici\" ou \"là\"\n",
-            
+            'instructions' => $this->aiInstructions,
             'model' => $this->aiModel
         ];
     }
@@ -592,26 +591,31 @@ class JeedomAssistant {
         
         $message = $question;
         if ($this->debug) echo "📝 Taille de la question initiale: " . strlen($question) . " octets\n";
-        
+
+        // Stocker la question originale pour l'historique (sans JSON)
+        $messageForHistory = $message;
+
         if(!empty($profile)) {
             $message = "C'est " . $profile . ". " . $message;
-        }   
+            //$messageForHistory = "C'est " . $profile . ". " . $messageForHistory;
+        }
         if($sendJeedomData === true) {
             // Collecter les données Jeedom
             $jeedomJson = $this->collectJeedomData($pieces, $mode);
-            
+
             // ⚠️ AJOUT: Vérifier la taille du JSON
             $jsonSize = strlen($jeedomJson);
             if ($this->debug) echo "📊 Taille du JSON Jeedom: " . number_format($jsonSize) . " octets (" . round($jsonSize / 1024, 2) . " KB)\n";
-            
+
             // Limiter à 10000 caractères environ (ajustez selon vos besoins)
             if ($jsonSize > 30000) {
                 echo "⚠️ WARNING: JSON très volumineux (". round($jsonSize / 1024, 2) . " KB), cela peut causer des erreurs\n";
                 // TODO : Tronquer ou filtrer davantage
             }
-            
-            $message = $message . "\n" . 
-                    "Voici les valeurs actuelles des capteurs de la domotique : " . 
+
+            // Ajouter le JSON au message envoyé à l'API (mais pas à l'historique)
+            $message = $message . "\n" .
+                    "Voici les valeurs actuelles des capteurs de la domotique : " .
                     $jeedomJson;
         }
         
@@ -629,10 +633,10 @@ class JeedomAssistant {
 
         if (!empty($images) && is_array($images)) {
             if ($this->debug) echo "Analyse d'image(s) : askWithImage\n";
-			$response = $this->ai->askWithImage($profile, $message, $assistantConfig, $images, $this->aiVisionModel);
+			$response = $this->ai->askWithImage($profile, $message, $assistantConfig, $images, $this->aiVisionModel, $messageForHistory);
     	} else {
             if ($this->debug) echo "Analyse de texte : ask\n";
-            $response = $this->ai->ask($profile, $message, $assistantConfig, $this->aiModel);
+            $response = $this->ai->ask($profile, $message, $assistantConfig, $this->aiModel, $messageForHistory);
         }
         
         if ($this->debug) echo "Réponse BRUTE : $response\n";
