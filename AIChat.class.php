@@ -2,7 +2,7 @@
 
 /* Classe d'utilisation de l'API chat conversation (multi-provider : OpenAI, Mistral, Claude)
 * @author Franck WEHRLE avec l'aide de Claude.ai
-* @version 3.01
+* @version 3.02
 */
 
 // ============================================
@@ -10,11 +10,11 @@
 // ============================================
 class AIChat {
     private $apiKey;
-    private $baseUrl = 'https://api.openai.com/v1';  // Par défaut OpenAI, modifiable
-    private $configFile = '/tmp/jeedom_ai_config.json';  // Renommé pour être agnostique
-    private $model = 'gpt-4o-mini'; // 'gpt-4o-mini' ou 'gpt-4o', 'gpt-4-turbo' ('gpt-4o', 'gpt-4-turbo' pour vision)
-    private $modelVision = 'gpt-4o'; //'gpt-4-turbo'
-    private $debug = true;
+    private $baseUrl = '';  // URL de l'API IA
+    private $configFile = '/tmp/jeedom_ai_config.json';  // Fichier de stockage de l'historique des conversations par profil
+    private $model = ''; // Modèle IA par défaut
+    private $modelVision = ''; //Modèle IA avec vision (reconnaissance d'image) par défaut
+    private $debug = true; // Affichage des logs de débuggage (valeur par défaut)
     private $conversationMaxAge = 3600; // Durée de vie max d'une conversation en secondes (1h par défaut)
 
     public function __construct($apiKey, $baseUrl, $model, $modelVision, $debug = true, $configFile = null) {
@@ -648,7 +648,7 @@ class AIChat {
                     - Caméras de surveillance
                     Tu peux analyser des images de caméras de surveillance.
                     Réponds de façon concise et pratique.',
-                'model' => $this->modelVision // gpt-4o ou gpt-4-turbo pour vision
+                'model' => $this->modelVision
             ];
         }
 
@@ -832,10 +832,10 @@ class AIChat {
      *
      * @param string $systemPrompt Instructions système pour l'IA
      * @param string $userMessage Message de l'utilisateur
-     * @param string $model Modèle à utiliser (défaut: gpt-4o-mini)
+     * @param string $model Modèle à utiliser
      * @return string Réponse de l'IA en texte brut
      */
-    public function chatCompletion($systemPrompt, $userMessage, $model = 'gpt-4o-mini') {
+    public function chatCompletion($systemPrompt, $userMessage, $model) {
         if ($this->debug) echo "chatCompletion avec modèle: $model\n";
         $startTime = microtime(true);
 

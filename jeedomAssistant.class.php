@@ -6,37 +6,9 @@
  * et d'exécuter les actions recommandées
  *
  * @author Franck WEHRLE
- * @version 3.01
+ * @version 3.02
  */
-/**
- * ┌─────────────────┬───────┬──────────────┬──────────────┬─────────────────────────┐
- * │ Modèle          │ Prix  │ Vitesse      │ Intelligence │ Idéal pour              │
- * ├─────────────────┼───────┼──────────────┼──────────────┼─────────────────────────┤
- * │ gpt-4o-mini     │ $     │ ⚡⚡⚡⚡    │ ⭐⭐⭐     │ RECOMMANDÉ Domotique    │
- * │                 │       │ Très rapide  │ Bon          │ Meilleur qualité/prix   │
- * │                 │       │              │              │ $0.15/1M tok (input)    │
- * │                 │       │              │              │ $0.60/1M tok (output)   │
- * ├─────────────────┼───────┼──────────────┼──────────────┼─────────────────────────┤
- * │ gpt-4o          │ $$$   │ ⚡⚡⚡      │ ⭐⭐⭐⭐   │ Meilleur choix général  │
- * │                 │       │ Rapide       │ Excellent    │ Analyses complexes      │
- * │                 │       │              │              │ $2.50/1M tok (input)    │
- * │                 │       │              │              │ $10.00/1M tok (output)  │
- * ├─────────────────┼───────┼──────────────┼──────────────┼─────────────────────────┤
- * │ gpt-4-turbo     │ $$$$  │ ⚡⚡        │ ⭐⭐⭐⭐    │ Tâches complexes        │
- * │                 │       │ Moyen        │ Excellent    │ Raisonnement avancé     │
- * ├─────────────────┼───────┼──────────────┼──────────────┼─────────────────────────┤
- * │ gpt-4           │ $$$$$ │ ⚡          │ ⭐⭐⭐⭐⭐  │ Analyses très poussées  │
- * │                 │       │ Lent         │ Top absolu   │ Budget confortable      │
- * ├─────────────────┼───────┼──────────────┼──────────────┼─────────────────────────┤
- * │ gpt-3.5-turbo   │ $     │ ⚡⚡⚡⚡   │ ⭐⭐         │ Tâches très simples     │
- * │                 │       │ Très rapide  │ Basique      │ Non recommandé          │
- * └─────────────────┴───────┴──────────────┴──────────────┴─────────────────────────┘
- * 
- * ESTIMATION COÛTS MENSUELS (50 requêtes/jour, usage typique domotique) :
- *   - gpt-4o-mini  : ~$0.50-1/mois   ← RECOMMANDÉ
- *   - gpt-4o       : ~$5-10/mois
- *   - gpt-4-turbo  : ~$15-30/mois
- * */
+
 require_once '/var/www/html/plugins/script/data/jeedomAssistant/AIChat.class.php';
 
 class JeedomAssistant {
@@ -77,9 +49,9 @@ class JeedomAssistant {
         // Configuration par défaut
         $defaults = [
             'ai_api_key' => '',
-            'ai_model' => 'gpt-4o-mini',
-          	'ai_vision_model' => 'gpt-4o', // ('gpt-4o', 'gpt-4-turbo' pour vision)
-            'ai_base_url' => 'https://api.openai.com/v1',
+            'ai_model' => '',
+          	'ai_vision_model' => '',
+            'ai_base_url' => '',
             'config_file' => '/tmp/jeedom_ai_config.json',
             'notification_scenario_id' => 0,
 
@@ -163,12 +135,11 @@ class JeedomAssistant {
                 "Maison", "Jardin", "Piscine", "Consos", "Entrée",
                 "Salon", "Salle à manger", "Cuisine", "Garage",
                 "12 niveau", "Bibliothèque", "Salle de bain",
-                "Chambre Parents", "Bureau", "Etage",
-                "Chambre Evan", "Chambre Eliott"
+                "Chambre Parents", "Bureau", "Etage"
             ],
             'equipements_exclus' => [
                 "Prise", "Volets", "Résumé", "Dodo",
-                "Eteindre", "Météo Bischwiller", "Pollens"
+                "Eteindre", "Météo xxx", "Pollens"
             ],
             'eq_action_inclus_categories' => [
                 "light", "opening", "heating"
@@ -911,7 +882,8 @@ class JeedomAssistant {
                 // Ajouter l'image au tableau
                 $images[] = [
                     'data' => $imageData,
-                    'filename' => "camera_" . $eqLogicId . ".jpg"
+                    'filename' => "camera_" . $eqLogicId . ".jpg" //Utile a l'IA pour identifier le numéro de l'image ?
+                    //'filename' => $eqLogicName . ".jpg"
                 ];
             } else {
                 if ($this->debug) echo "❌ Impossible de récupérer l'image de $eqLogicName\n";
@@ -997,11 +969,11 @@ class JeedomAssistant {
      * 
      * @param string $profile Destinataire
      * @param string $message Message à envoyer
-     * @param string $command Commande de notification (optionnel)
+     * @param string $command Commande de notification (optionnel : id de la commande de notification)
      */
     public function sendMessageNotification($profile, $message, $command = '') {
         if(empty($message)){
-            $message = "Désolé, je ne sais pas répondre à cette demande.";
+            $message = "Désolé, je n'ai pas compris la demande.";
             if ($this->debug) echo "Message vide, envoi incompréhension\n";
         }   
         if ($this->debug) echo "Envoi notification à $profile: $message\n";

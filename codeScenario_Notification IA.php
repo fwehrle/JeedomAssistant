@@ -4,14 +4,14 @@
  * Version simplifiée utilisant la classe JeedomAssistant
  *
  * @author Franck WEHRLE
- * @version 3.01
+ * @version 3.02
  *
- * Tags nécessaires:
+ * Tags nécessaires lors de l'appel du scénario:
  * - #profile# : Nom de l'utilisateur (obligatoire)
  * - #msg# : Question/commande (obligatoire)
  * - #piece# : Pièce(s) concernée(s) (optionnel)
  * - #mode# : 'action' ou 'info' (optionnel, défaut: 'action')
- * - #command# : Commande de notification (optionnel)
+ * - #command# : Commande de notification retour (optionnel)
  */
 
 // ============================================
@@ -21,8 +21,9 @@ $notificationScenarioId = 387; // TODO ID de votre scénario de notification
 
 require_once '/var/www/html/plugins/script/data/jeedomAssistant/jeedomAssistant.class.php';
 
-// Exemples de configuration multi-provider :
-//
+// Exemples de configuration multi-provider : (décommenter et adapter selon le provider choisi)
+//La clé API est ici récupérée depuis une variable de scénario, mais peut être hardcodée si besoin (déconseillé pour la sécurité)
+
 // OpenAI :
 // $aiApiKey = $scenario->getData('OPENAI_API_KEY'); //Token API
 // $aiBaseUrl = "https://api.openai.com/v1"; //URL de base de l'API OpenAI
@@ -32,10 +33,11 @@ require_once '/var/www/html/plugins/script/data/jeedomAssistant/jeedomAssistant.
 // Mistral :
 $aiApiKey = $scenario->getData('MISTRAL_API_KEY'); //Token API
 $aiBaseUrl = "https://api.mistral.ai/v1"; //URL de base de l'API Mistral
-$aiModel = "mistral-small-latest"; // mistral-small-2506 : léger et rapide /magistral-small-2509 : équilibré et puissant
-$aiModelVision = "pixtral-12b"; // Vision : mistral-small-2506 ou pixtral-large-latest (avec vision) / pixtral-12b-2409 (vision uniquement)
+$aiModel = "mistral-large-latest"; // mistral-small-2506 : léger et rapide /mistral-small-latest magistral-small-2509 : équilibré et puissant
+$aiModelVision = "pixtral-large-latest"; // Vision : pixtral-12b mistral-small-2506 ou pixtral-large-latest (avec vision) / pixtral-12b-2409 (vision uniquement)
 
-// Claude :
+// Claude : 
+// Pas de reconnaissance d'image pour Claude pour le moment
 // $aiApiKey = $scenario->getData('CLAUDE_API_KEY'); //Token API
 // $aiBaseUrl = "https://api.anthropic.com/v1"; //URL de base de l'API Claude
 // $aiModel = "claude-3-5-sonnet-20241022"; // claude-3-5-sonnet-20241022 / claude-4-100k-20241022
@@ -124,24 +126,23 @@ $config = [
         "- Mémorise les préférences exprimées par chaque utilisateur\n" .
         "- Si une pièce a été mentionnée récemment, c'est probablement celle concernée par \"ici\" ou \"là\"\n",
 
-    // Pièces à inclure
+    // Pièces à inclure dans les infos a envoyer à l'IA
     'pieces_inclus' => [
         "Maison", "Jardin", "Piscine", "Consos", "Entrée", "Salon", "Salle à manger", "Cuisine", "Garage",
         "Demi Niveau", "Bibliothèque", "Salle de bain", "Chambre Parents", "Bureau", "Etage", "Chambre Evan", "Chambre Eliott"
     ],
 
-    // Équipements à exclure
+    // Équipements à exclure dans les infos a envoyer à l'IA
     'equipements_exclus' => [
         "Prise", "Volets", "Résumé", "Dodo", "Eteindre", "Météo Bischwiller", "Pollens", "Caméra Tablette Salon"
     ],
 
-    // Catégories d'actions autorisées "light", "opening", "heating","security","energy","automatism","multimedia","default"
+    // Catégories d'actions autorisées à l'IA : "light", "opening", "heating","security","energy","automatism","multimedia","default"
     'eq_action_inclus_categories' => ["light", "opening", "heating", "security"],
 
     // Commandes à exclure
     'eq_cmd_exclus' => ["Rafraichir", "binaire", "Thumbnail"],
 
-    // Debug (mettre à true pour voir les détails)
     'debug' => false, //Affichage des logs de débuggage dans le log scenario_execution
     'debug_eq' => false, //Affichage de la liste des équipements chargés
     'debug_eq_detail' => false, //Affichage du détail des équipements chargés
