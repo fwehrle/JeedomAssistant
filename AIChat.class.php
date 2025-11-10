@@ -16,6 +16,8 @@ class AIChat {
     private $modelVision = ''; //Modèle IA avec vision (reconnaissance d'image) par défaut
     private $debug = true; // Affichage des logs de débuggage (valeur par défaut)
     private $conversationMaxAge = 3600; // Durée de vie max d'une conversation en secondes (1h par défaut)
+    private $lastApiCallTimestamp = 0; // Timestamp du dernier appel API (pour rate limiting)
+    private $minDelayBetweenCalls = 1.0; // Délai minimum entre deux appels API en secondes
 
     public function __construct($apiKey, $baseUrl, $model, $modelVision, $debug = true, $configFile = null) {
       if ($this->debug) echo "__construct\n";
@@ -42,6 +44,49 @@ class AIChat {
         }
 
         $this->debug = $debug;
+    }
+
+    /**
+     * Attendre le délai minimum entre deux appels API pour éviter le rate limiting
+     *
+     * @return void
+     */
+    private function waitForRateLimit() {
+        if ($this->lastApiCallTimestamp === 0) {
+            // Premier appel, pas besoin d'attendre
+            $this->lastApiCallTimestamp = microtime(true);
+            return;
+        }
+
+        $now = microtime(true);
+        $timeSinceLastCall = $now - $this->lastApiCallTimestamp;
+
+        if ($timeSinceLastCall < $this->minDelayBetweenCalls) {
+            $waitTime = $this->minDelayBetweenCalls - $timeSinceLastCall;
+
+            if ($this->debug) {
+                echo sprintf("⏳ Rate limiting: attente de %.2fs avant le prochain appel API...\n", $waitTime);
+            }
+
+            // Attendre le temps restant (en microsecondes)
+            usleep((int)($waitTime * 1000000));
+        }
+
+        // Mettre à jour le timestamp du dernier appel
+        $this->lastApiCallTimestamp = microtime(true);
+    }
+
+    /**
+     * Configurer le délai minimum entre deux appels API
+     *
+     * @param float $seconds Délai en secondes (peut être décimal, ex: 0.5 pour 500ms)
+     * @return void
+     */
+    public function setMinDelayBetweenCalls($seconds) {
+        $this->minDelayBetweenCalls = (float)$seconds;
+        if ($this->debug) {
+            echo "Délai minimum entre appels API configuré à {$seconds}s\n";
+        }
     }
 
     /**
@@ -276,6 +321,9 @@ class AIChat {
      * Appel API générique
      */
     private function apiCall($method, $endpoint, $data = null, $retryCount = 0, $maxRetries = 3) {
+        // ⏳ Attendre le délai minimum entre deux appels API (rate limiting)
+        $this->waitForRateLimit();
+
         if (empty($endpoint)) {
             throw new Exception("Endpoint vide");
         }
@@ -385,6 +433,9 @@ class AIChat {
      */
     public function ask($profile, $message, $assistantConfig = null, $modelOverride = null, $messageForHistory = null) {
         $startTime = microtime(true);
+
+        // ⏳ Attendre le délai minimum entre deux appels API (rate limiting)
+        $this->waitForRateLimit();
 
         // Configuration par défaut de l'assistant
         if ($assistantConfig === null) {
@@ -635,6 +686,9 @@ class AIChat {
     public function askWithImage($profile, $message, $assistantConfig = null, $images = null, $modelOverride = null, $messageForHistory = null) {
         $startTime = microtime(true);
 
+        // ⏳ Attendre le délai minimum entre deux appels API (rate limiting)
+        $this->waitForRateLimit();
+
         // Configuration par défaut de l'assistant avec support vision
         if ($assistantConfig === null) {
             if ($this->debug) echo "Config Assistant par defaut avec support vision\n";
@@ -838,6 +892,9 @@ class AIChat {
     public function chatCompletion($systemPrompt, $userMessage, $model) {
         if ($this->debug) echo "chatCompletion avec modèle: $model\n";
         $startTime = microtime(true);
+
+        // ⏳ Attendre le délai minimum entre deux appels API (rate limiting)
+        $this->waitForRateLimit();
 
         try {
             // Construction de la requête pour l'API Chat Completion

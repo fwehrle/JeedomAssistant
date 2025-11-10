@@ -212,6 +212,17 @@ class JeedomAssistant {
     }
 
     /**
+     * Configurer le délai minimum entre deux appels API (rate limiting)
+     * Méthode de commodité pour $assistant->getAI()->setMinDelayBetweenCalls()
+     *
+     * @param float $seconds Délai en secondes (1.0 = 1s, 0.5 = 500ms, 2.0 = 2s, etc.)
+     * @return void
+     */
+    public function setMinDelayBetweenCalls($seconds) {
+        $this->ai->setMinDelayBetweenCalls($seconds);
+    }
+
+    /**
      * Réinitialiser l'historique de conversation pour un profil
      * Méthode de commodité pour $assistant->getAI()->resetConversation()
      *
@@ -1045,6 +1056,15 @@ class JeedomAssistant {
                     $cameraName = $eqLogic->getHumanName();
                     //if ($this->debug) echo "Envoi snapshot de la caméra: $cameraName\n";
                     
+                    // Rechercher la commande avec logicalId = 'takeSnapshot' pour forcer un snapshot avant celui a envoyer
+                    //TODO : workaround pour éviter d'envoyer une image trop ancienne
+                    $takeSnapshotCmd = null;
+                    foreach ($eqLogic->getCmd() as $cmd) {
+                        if ($cmd->getLogicalId() === 'takeSnapshot') {
+                            $takeSnapshotCmd = $cmd;
+                            break;
+                        }
+                    }
                     // Rechercher la commande avec logicalId = 'sendSnapshot'
                     $sendSnapshotCmd = null;
                     foreach ($eqLogic->getCmd() as $cmd) {
@@ -1053,6 +1073,7 @@ class JeedomAssistant {
                             break;
                         }
                     }
+                    
                     
                     if (!is_object($sendSnapshotCmd)) {
                         echo "Commande 'sendSnapshot' non trouvée pour la caméra ID $cameraId\n";
@@ -1101,6 +1122,11 @@ class JeedomAssistant {
                         echo "  - Message/Commande: $command\n";
                     }
                     
+                     if (is_object($takeSnapshotCmd) && $takeSnapshotCmd->getType() === 'action') {
+                        $takeSnapshotCmd->execCmd($execParams);
+                        if ($this->debug) echo "Snapshot forcé avec succès pour la caméra: $cameraName\n";
+                    }
+
                     // Exécuter la commande sendSnapshot
                     $sendSnapshotCmd->execCmd($execParams);
                     if ($this->debug) echo "Snapshot envoyé avec succès pour la caméra: $cameraName\n";
