@@ -2,7 +2,7 @@
 
 /* Classe d'utilisation de l'API chat conversation (multi-provider : OpenAI, Mistral, Claude)
 * @author Franck WEHRLE avec l'aide de Claude.ai
-* @version 3.02
+* @version 3.03
 */
 
 // ============================================

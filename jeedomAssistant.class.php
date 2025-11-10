@@ -6,7 +6,7 @@
  * et d'exécuter les actions recommandées
  *
  * @author Franck WEHRLE
- * @version 3.02
+ * @version 3.03
  */
 
 require_once '/var/www/html/plugins/script/data/jeedomAssistant/AIChat.class.php';
