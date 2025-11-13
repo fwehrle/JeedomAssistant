@@ -4,7 +4,7 @@
  * Version simplifiée utilisant la classe JeedomAssistant
  *
  * @author Franck WEHRLE
- * @version 3.02
+ * @version 3.04
  *
  * Tags nécessaires lors de l'appel du scénario:
  * - #profile# : Nom de l'utilisateur (obligatoire)
@@ -33,8 +33,9 @@ require_once '/var/www/html/plugins/script/data/jeedomAssistant/jeedomAssistant.
 // Mistral :
 $aiApiKey = $scenario->getData('MISTRAL_API_KEY'); //Token API
 $aiBaseUrl = "https://api.mistral.ai/v1"; //URL de base de l'API Mistral
-$aiModel = "mistral-large-latest"; // mistral-small-2506 : léger et rapide /mistral-small-latest magistral-small-2509 : équilibré et puissant
-$aiModelVision = "pixtral-large-latest"; // Vision : pixtral-12b mistral-small-2506 ou pixtral-large-latest (avec vision) / pixtral-12b-2409 (vision uniquement)
+//https://docs.mistral.ai/getting-started/models
+$aiModel = "mistral-large-2411"; // mistral-small-2506 : léger et rapide /mistral-small-latest magistral-small-2509 : équilibré et puissant
+$aiModelVision = "pixtral-large-2411"; // Vision : pixtral-12b mistral-small-2506 ou pixtral-large-latest (avec vision) / pixtral-12b-2409 (vision uniquement)
 
 // Claude : 
 // Pas de reconnaissance d'image pour Claude pour le moment

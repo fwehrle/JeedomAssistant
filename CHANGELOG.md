@@ -1,6 +1,12 @@
 # Changelog - JeedomAssistant
 
-## Version 3.02 (2025-11-10)
+## Version 3.04 (2025-11-12)
+
+### Ajout de la description (commentaire) des équipements en ayant une, pour faciliter la compréhension par l'IA
+
+### Changement des modèles dans le code du scénario : moins de limites et plus intelligents
+
+## Version 3.02-03 (2025-11-10)
 
 ### 🎯 Ajout d'un limiteur du nombre de requête pour ne pas dépasser 1 requête par seconde (limite Mistral)
 ### Ajout d'un contournement : on prend un snapshot avant d'en envoyer un à l'utilisateur (celui envoyé à l'IA est bon), pour éviter l'envoi d'une image antérieur (bug?)

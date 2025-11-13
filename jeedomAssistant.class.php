@@ -6,7 +6,7 @@
  * et d'exécuter les actions recommandées
  *
  * @author Franck WEHRLE
- * @version 3.03
+ * @version 3.04
  */
 
 require_once '/var/www/html/plugins/script/data/jeedomAssistant/AIChat.class.php';
@@ -290,12 +290,23 @@ class JeedomAssistant {
             $eqType = $eqLogic->getEqType_name();
             if ($eqType === 'camera') {
                 // Pour les caméras, ajouter uniquement l'ID de l'équipement
-                $this->jeedomCommands[$piece][$eqName] = [
+                $cameraData = [
                     'id' => $eqLogic->getId()
                 ];
 
+                // Ajouter la description si le commentaire existe
+                $comment = $eqLogic->getComment();
+                if (!empty($comment)) {
+                    $cameraData['description'] = $comment;
+                }
+
+                $this->jeedomCommands[$piece][$eqName] = $cameraData;
+
                 if ($this->debugEqDetail) {
                     echo "|  Type: Camera (ID: " . $eqLogic->getId() . ")\n";
+                    if (!empty($comment)) {
+                        echo "|  Description: " . substr($comment, 0, 50) . "...\n";
+                    }
                 }
 
                 continue; // Passer à l'équipement suivant
@@ -305,13 +316,23 @@ class JeedomAssistant {
             
             // Collecter les commandes
             $eqCmds = $this->collectEquipmentCommands(
-                $eqLogic, 
-                $eqName, 
-                $mode, 
+                $eqLogic,
+                $eqName,
+                $mode,
                 $isAuthorizedCatAction
             );
-            
+
             if (!empty($eqCmds)) {
+                // Ajouter la description si le commentaire existe
+                $comment = $eqLogic->getComment();
+                if (!empty($comment)) {
+                    $eqCmds['description'] = $comment;
+
+                    if ($this->debugEqDetail) {
+                        echo "|  Description: " . substr($comment, 0, 50) . "...\n";
+                    }
+                }
+
                 $this->jeedomCommands[$piece][$eqName] = $eqCmds;
             }
         }
