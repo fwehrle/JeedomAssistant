@@ -2,9 +2,10 @@
 /**
  * Scénario d'interrogation IA multi-provider (OpenAI, Mistral, Claude)
  * Version simplifiée utilisant la classe JeedomAssistant
+ * NOTE importante : si le scenario doit être utilisé vocalement via TTS en API, il est conseillé de la passer en Synchrone pour attendre la réponse.
  *
  * @author Franck WEHRLE
- * @version 3.04
+ * @version 3.05
  *
  * Tags nécessaires lors de l'appel du scénario:
  * - #profile# : Nom de l'utilisateur (obligatoire)
@@ -17,9 +18,13 @@
 // ============================================
 // CONFIGURATION
 // ============================================
+$debug = true;  
 $notificationScenarioId = 387; // TODO ID de votre scénario de notification
 
-require_once '/var/www/html/plugins/script/data/jeedomAssistant/jeedomAssistant.class.php';
+//Optionnel : Stockage de la réponse dans une variable de scénario ou une commande
+$responseVariableName = ''; //'jeedomAssistant_Response'; // Variable de scénario pour stocker la réponse. Laisser vide si pas utilisé
+$responseCommandId = 107223; // Commande de stockage de la réponse (optionnel). Laisser vide si pas utilisé
+$responseCleantForTTS = true; // Nettoyer la réponse pour TTS (supprime emojis, caractères spéciaux)
 
 // Exemples de configuration multi-provider : (décommenter et adapter selon le provider choisi)
 //La clé API est ici récupérée depuis une variable de scénario, mais peut être hardcodée si besoin (déconseillé pour la sécurité)
@@ -144,11 +149,13 @@ $config = [
     // Commandes à exclure
     'eq_cmd_exclus' => ["Rafraichir", "binaire", "Thumbnail"],
 
-    'debug' => false, //Affichage des logs de débuggage dans le log scenario_execution
+    'debug' => $debug, //Affichage des logs de débuggage dans le log scenario_execution
     'debug_eq' => false, //Affichage de la liste des équipements chargés
     'debug_eq_detail' => false, //Affichage du détail des équipements chargés
     'debug_dont_run_action' => false //Ne pas exécuter les actions (mode test)
 ];
+
+require_once '/var/www/html/plugins/script/data/jeedomAssistant/jeedomAssistant.class.php';
 
 // ============================================
 // RÉCUPÉRATION DES TAGS
@@ -210,7 +217,12 @@ try {
     // Vérifier le résultat
     if ($result['success']) {
         $scenario->setLog("✅ Réponse: " . $result['message']);
-        
+        //Stocker la réponse dans une variable jeedom pour retour utilisateur (TTS Tasker Android)
+        $saveResult = JeedomAssistant::saveResponse($result['response']['response'], $responseCommandId, $responseVariableName, $responseCleantForTTS);
+        if (!$saveResult['success']) {
+            $scenario->setLog("⚠️ Erreur stockage réponse: " . $saveResult['message']);
+        }
+
         if ($result['action_executed']) {
             $scenario->setLog("🎬 Action exécutée");
         }
@@ -225,17 +237,20 @@ try {
         $scenario->setLog("📊 Confiance: " . $response['confidence']);
         
     } else {
-        $errorMsg = "❌ Erreur scénario: " . $result['error'];
+        $errorMsg = "❌ Erreur du retour de l'IA: " . $result['error'];
         echo $errorMsg."\n";
-        $assistant->sendMessageNotification($profile, $errorMsg, $notificationCommand);
         $scenario->setLog($errorMsg);
+        $errorMsg = "Je n'ai pas compris la question : " . $result['error'];
+        JeedomAssistant::saveResponse($errorMsg, $responseCommandId, $responseVariableName, $responseCleantForTTS);
+        $assistant->sendMessageNotification($profile, $errorMsg, $notificationCommand);
     }
     
 } catch (Exception $e) {
     $errorMsg = "❌ Exception scénario: " . $e->getMessage();
     echo $errorMsg."\n";
     $scenario->setLog($errorMsg);
-    
+    $errorMsg = "Je ne suis pas en mesure de répondre : " . $e->getMessage();
+    JeedomAssistant::saveResponse($errorMsg, $responseCommandId, $responseVariableName, $responseCleantForTTS);
     echo "Envoyer une notification d'erreur à  la commande ".$notificationCommand." au scenario ".$config['notification_scenario_id']."\n";
     $scenario2 = scenario::byId($config['notification_scenario_id']);
     if (is_object($scenario2)) {

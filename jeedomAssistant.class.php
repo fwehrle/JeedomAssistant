@@ -6,7 +6,7 @@
  * et d'exécuter les actions recommandées
  *
  * @author Franck WEHRLE
- * @version 3.04
+ * @version 3.05
  */
 
 require_once '/var/www/html/plugins/script/data/jeedomAssistant/AIChat.class.php';
@@ -1606,6 +1606,165 @@ class JeedomAssistant {
             // Plusieurs éléments : séparer par des retours à la ligne
             return implode("\n", $names);
         }
+    }
+
+    /**
+     * Nettoyer un texte pour la synthèse vocale (TTS)
+     * Supprime les emojis, caractères spéciaux et autres éléments non prononcables
+     *
+     * @param string $text Texte à nettoyer
+     * @return string Texte nettoyé
+     */
+    private static function cleanTextForTTS($text) {
+        // ✅ Supprimer tous les emojis (une large plage Unicode)
+        $text = preg_replace('/[\x{1F300}-\x{1F9FF}]/u', '', $text);
+        $text = preg_replace('/[\x{2600}-\x{27BF}]/u', '', $text);
+        $text = preg_replace('/[\x{1F100}-\x{1F64F}]/u', '', $text);
+        $text = preg_replace('/[\x{1F680}-\x{1F6FF}]/u', '', $text);
+        $text = preg_replace('/[\x{2300}-\x{23FF}]/u', '', $text);
+        $text = preg_replace('/[\x{2B50}-\x{2B55}]/u', '', $text);
+
+        // ✅ Supprimer les caractères de contrôle et autres symboles problématiques
+        $text = preg_replace('/[^\p{L}\p{N}\s\.,!?;:\-\'\"()«»]/u', '', $text);
+
+        // ✅ Remplacer les caractères spéciaux par des équivalents prononçables
+        $replacements = [
+            '€' => 'euros',
+            '£' => 'livres',
+            '$' => 'dollars',
+            '°' => 'degrés',
+            '℃' => 'degrés Celsius',
+            '℉' => 'degrés Fahrenheit',
+            '±' => 'plus ou moins',
+            '×' => 'fois',
+            '÷' => 'divisé par',
+            '=' => 'égal à',
+            '<' => 'inférieur à',
+            '>' => 'supérieur à',
+            '≤' => 'inférieur ou égal à',
+            '≥' => 'supérieur ou égal à',
+            '→' => 'flèche',
+            '←' => 'flèche',
+            '↑' => 'flèche',
+            '↓' => 'flèche',
+            '…' => '.',
+        ];
+
+        foreach ($replacements as $char => $replacement) {
+            $text = str_replace($char, $replacement, $text);
+        }
+
+        // ✅ Nettoyer les espaces multiples
+        $text = preg_replace('/\s+/', ' ', $text);
+
+        // ✅ Supprimer les espaces en début et fin
+        $text = trim($text);
+
+        return $text;
+    }
+
+    /**
+     * Stocker la réponse de l'IA soit dans une variable de scénario soit dans une commande info
+     * Fonction publique statique (utilisable sans initialiser jeedomAssistant)
+     *
+     * @param string $response La réponse à stocker
+     * @param int|null $responseCommandId ID de la commande info pour stocker la réponse (optionnel)
+     * @param string|null $responseVariableName Nom de la variable de scénario pour stocker la réponse (optionnel)
+     * @param bool $cleanForTTS Si true, nettoie le texte pour la synthèse vocale (supprime emojis, etc) (optionnel)
+     * @return array Résultat: ['success' => bool, 'message' => string, 'stored_in' => string]
+     * 
+     * @example
+     * // Stocker dans une variable de scénario
+     * JeedomAssistant::saveResponse("La lumière est allumée", null, "varResponseIA");
+     * 
+     * // Stocker dans une commande info
+     * JeedomAssistant::saveResponse("La lumière est allumée", 12345, null);
+     * 
+     * // Stocker dans les deux
+     * JeedomAssistant::saveResponse("La lumière est allumée", 12345, "varResponseIA");
+     * 
+     * // Stocker avec nettoyage TTS (supprime emojis, caractères spéciaux)
+     * JeedomAssistant::saveResponse("✅ La lumière est allumée 💡", 12345, "varResponseIA", true);
+     */
+    public static function saveResponse($response, $responseCommandId = null, $responseVariableName = null, $cleanForTTS = false) {
+        $results = [
+            'success' => true,
+            'message' => '',
+            'stored_in' => [],
+            'errors' => []
+        ];
+
+        // Vérifier qu'au moins un paramètre de stockage est fourni
+        if (empty($responseCommandId) && empty($responseVariableName)) {
+            $results['success'] = false;
+            $results['message'] = "Erreur: Au moins un paramètre (responseCommandId ou responseVariableName) doit être fourni.";
+            return $results;
+        }
+
+        // Vérifier que la réponse n'est pas vide
+        if (is_null($response) || (is_string($response) && trim($response) === '')) {
+            $results['success'] = false;
+            $results['message'] = "Erreur: La réponse est vide.";
+            return $results;
+        }
+
+        // ✅ Nettoyer le texte pour TTS si demandé
+        $textToStore = $response;
+        if ($cleanForTTS) {
+            $textToStore = self::cleanTextForTTS($response);
+        }
+
+        // ✅ Stocker dans une commande info si l'ID est fourni
+        if (!empty($responseCommandId)) {
+            try {
+                $cmd = cmd::byId($responseCommandId);
+
+                if (!is_object($cmd)) {
+                    $results['errors'][] = "Commande ID $responseCommandId non trouvée";
+                    $results['success'] = false;
+                } elseif ($cmd->getType() !== 'info') {
+                    $results['errors'][] = "La commande ID $responseCommandId n'est pas une commande info (type: " . $cmd->getType() . ")";
+                    $results['success'] = false;
+                } else {
+                    // Stocker la réponse dans la commande info
+                    $cmd->setCache('value', $textToStore);
+                    $cmd->event($textToStore);
+                    $results['stored_in'][] = "Commande info ID $responseCommandId (" . $cmd->getHumanName() . ")";
+                }
+            } catch (Exception $e) {
+                $results['errors'][] = "Erreur lors du stockage dans la commande: " . $e->getMessage();
+                $results['success'] = false;
+            }
+        }
+
+        // ✅ Stocker dans une variable de scénario si le nom est fourni
+        if (!empty($responseVariableName)) {
+            try {
+                // Récupérer ou créer la variable de scénario
+                $scenario = scenario::byId(scenario::getScenarioFromScenarioDecorator(null));
+
+                if (!is_object($scenario)) {
+                    $results['errors'][] = "Impossible de récupérer le scénario courant pour stocker la variable '$responseVariableName'";
+                    $results['success'] = false;
+                } else {
+                    // Stocker la réponse dans la variable de scénario
+                    $scenario->setData($responseVariableName, $textToStore);
+                    $results['stored_in'][] = "Variable de scénario '$responseVariableName'";
+                }
+            } catch (Exception $e) {
+                $results['errors'][] = "Erreur lors du stockage dans la variable de scénario: " . $e->getMessage();
+                $results['success'] = false;
+            }
+        }
+
+        // Construire le message récapitulatif
+        if (!empty($results['stored_in'])) {
+            $results['message'] = "Réponse stockée avec succès dans: " . implode(", ", $results['stored_in']);
+        } elseif ($results['success'] === false) {
+            $results['message'] = "Erreurs lors du stockage: " . implode("; ", $results['errors']);
+        }
+
+        return $results;
     }
 
 }

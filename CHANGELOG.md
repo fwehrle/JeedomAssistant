@@ -1,5 +1,10 @@
 # Changelog - JeedomAssistant
 
+## Version 3.05 (2025-11-17)
+
+### Ajout d'une fonction de stockage de la réponse, avec nettoyage pour vocalisation (TTS)
+### Code Scenario : stockage de la réponse dans une variable ou une command info pour retour user autre (tasker, tts..)
+
 ## Version 3.04 (2025-11-12)
 
 ### Ajout de la description (commentaire) des équipements en ayant une, pour faciliter la compréhension par l'IA
